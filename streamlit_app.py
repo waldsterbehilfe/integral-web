@@ -55,8 +55,8 @@ st.sidebar.markdown("### 📊 Status")
 cache_files = sum([len(files) for r, d, files in os.walk(CACHE_DIR)])
 st.sidebar.metric("Cache Einträge", cache_files)
 
-st.title("🗺️ MAPMARKER 3000 — LANDKREIS")
-st.caption("Fokus: Landkreis Marburg-Biedenkopf // Strikter Geofence")
+st.title("🗺️ MAPMARKER 3000 — FORCED SEARCH")
+st.caption("Strikte Suche: Landkreis Marburg-Biedenkopf")
 
 uploaded_file = st.file_uploader("📥 Lade deine Straßenliste (.txt) hoch", type=["txt"])
 
@@ -66,7 +66,7 @@ if uploaded_file is not None:
     strassen = [s.strip() for s in stringio if s.strip()]
     
     total = len(strassen)
-    start_btn = st.button("🚀 Suche im Landkreis")
+    start_btn = st.button("🚀 Suche starten")
     
     if start_btn:
         ort_sammlung = defaultdict(list)
@@ -75,38 +75,45 @@ if uploaded_file is not None:
         status_text = st.empty()
         progress_bar = st.progress(0)
         
-        # Geofencing: Definition des Landkreises
-        LANDKREIS_NAME = "Landkreis Marburg-Biedenkopf"
+        # Geofencing: Bounding Box für den Landkreis (Marburg-Biedenkopf)
+        # Format: [north, south, east, west]
+        LK_BOUNDS = [51.05, 50.65, 9.15, 8.30] 
         
         for i, strasse in enumerate(strassen):
             status_text.text(f"🔍 Suche: {strasse} ({i+1}/{total})")
             
             eintrag = bereinige_adresse(strasse)
             
-            # --- SUCHE MIT STRIKTER LANDKREIS-BINDUNG ---
-            query = f"{eintrag}, {LANDKREIS_NAME}, Germany"
+            # --- SUCHE MIT FORCED BBOX ---
+            query = f"{eintrag}, Germany"
             
             try:
-                # Suche mit vergrößertem Radius für bessere Trefferquote innerhalb des Landkreises
-                gdf = ox.features_from_address(query, tags={"highway": True}, dist=2000)
+                # Suche mit Bounding Box (Distanz reduziert, da BBox limitiert)
+                gdf = ox.features_from_place(query, tags={"highway": True})
                 
+                # Wenn features_from_place nicht reicht, nutze features_from_address mit fallback
+                if gdf.empty:
+                    gdf = ox.features_from_address(f"{eintrag}, Germany", tags={"highway": True}, dist=1000)
+
                 if not gdf.empty:
                     gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
+                    
+                    # Straßenname filtern
                     gdf_f = gdf[gdf['name'].str.contains(eintrag, case=False, na=False)] if 'name' in gdf.columns else gdf
                     
                     if not gdf_f.empty:
-                        # Ortserkennung im Landkreis
+                        # Ortserkennung
                         stadt_info = "Sonstiges_Landkreis"
                         for col in ['addr:suburb', 'addr:city', 'municipality', 'city', 'county']:
                             if col in gdf_f.columns and gdf_f[col].dropna().any():
                                 val = gdf_f[col].dropna().iloc[0]
-                                if LANDKREIS_NAME not in val: # Ortsteil priorisieren
+                                if "Marburg" in val or "Biedenkopf" in val: # Ortsteil priorisieren
                                     stadt_info = val
                                     break
                         
                         ort_sammlung[stadt_info].append({"gdf": gdf_f, "name": eintrag, "query": query})
-                    else: errors.append(f"Nicht eindeutig: {strasse}")
-                else: errors.append(f"Nicht im Landkreis: {strasse}")
+                    else: errors.append(f"Nicht gefunden: {strasse}")
+                else: errors.append(f"Keine Daten: {strasse}")
             except Exception as e:
                 errors.append(f"Fehler bei {strasse}: {str(e)}")
             
@@ -130,7 +137,6 @@ if uploaded_file is not None:
                     
                     if any(c.isdigit() for c in item["name"]):
                         try:
-                            # Geocode erneut mit Landkreis-Bezug
                             p_gdf = ox.geocode_to_gdf(item["query"])
                             if not p_gdf.empty:
                                 loc = p_gdf.iloc[0].geometry.centroid
