@@ -68,7 +68,7 @@ def apply_titan_style(dark, bg_active):
     sub_bg = "rgba(0, 212, 255, 0.03)" if dark else "rgba(0, 85, 255, 0.03)"
 
     # --- KONFIGURATION FÜR MAIL ---
-    EMAIL_ADRESSE = "maus-p@online.de" # <-- HIER ANPASSEN
+    EMAIL_ADRESSE = "deine.email@beispiel.de" # <-- HIER ANPASSEN
     MAIL_LINK = f"mailto:{EMAIL_ADRESSE}?subject=Feedback%20zu%20Titan%20Mapmarker"
 
     st.markdown(f"""
@@ -106,13 +106,13 @@ def apply_titan_style(dark, bg_active):
         /* SIDEBAR FEEDBACK */
         .feedback-sidebar-btn {{ font-size: 0.5rem !important; height: 1.5rem !important; opacity: 0.5; }}
         </style>
-        <a href="{MAIL_LINK}" class="copyright-branding"><b>Peter MAUS</b> © 2026</a>
+        <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V15.2", layout="wide")
-ist_dunkel = st.sidebar.toggle("Dunkel", True)
-bg_an = st.sidebar.toggle("Hintergrundbild", True)
+st.set_page_config(page_title="TITAN V16.0", layout="wide")
+ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
+bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
 
 # --- SIDEBAR FEEDBACK (Ganz unten & klein) ---
@@ -132,7 +132,7 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 15.2 // Tooltip Fix")
+st.caption("Version 16.0 // Clean Edition")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
@@ -174,6 +174,7 @@ if start_btn:
             
             try:
                 q = f"{eintrag}, Landkreis Marburg-Biedenkopf, Germany"
+                # POI entfernen: tags={"highway": True} ist korrekt, dist weiter
                 gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
                 
                 if not gdf.empty:
@@ -206,11 +207,13 @@ if start_btn:
             for ortsteil, items in results_by_district.items():
                 st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
                 
-                m = folium.Map(tiles='cartodbdark_matter' if ist_dunkel else 'cartodbpositron')
+                # --- ORIGINAL FARBEN WIEDERHERSTELLEN ---
+                # tiles='openstreetmap' für Standardfarben
+                m = folium.Map(tiles='openstreetmap')
                 alle_geoms = []
                 
                 for item in items:
-                    # --- TOOLTIP SICHERHEITS-CHECK ---
+                    # TOOLTIP SICHERHEITS-CHECK
                     tooltip_fields = ['name'] if 'name' in item["gdf"].columns else []
                     
                     folium.GeoJson(
@@ -221,17 +224,22 @@ if start_btn:
                     
                     alle_geoms.append(item["gdf"])
                     
+                    # --- BLAUES FÄHNE FÜR HAUSNUMMER ---
                     if any(c.isdigit() for c in item["name"]):
                         p_gdf = ox.geocode_to_gdf(item["query"])
                         if not p_gdf.empty:
                             loc = p_gdf.iloc[0].geometry.centroid
-                            folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='flag')).add_to(m)
+                            # Blauer Marker
+                            folium.Marker(
+                                [loc.y, loc.x], 
+                                icon=folium.Icon(color='blue', icon='info-sign'),
+                                popup=item["name"]
+                            ).add_to(m)
                 
                 # --- ZOOM: VERBESSERTE LOGIK ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
                     bounds = combined_gdf.total_bounds
-                    # Sicherstellen, dass bounds existieren
                     if not combined_gdf.empty:
                         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 
@@ -244,5 +252,3 @@ if start_btn:
         
         if fehler:
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
-
-
