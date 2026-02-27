@@ -59,7 +59,7 @@ def apply_titan_style(dark, bg_active):
     if bg_active and os.path.exists('hintergrund.png'):
         with open('hintergrund.png', 'rb') as f:
             data = base64.b64encode(f.read()).decode()
-        bg_css = f'background-image: url("data:image/png;base64,{data}");'
+        bg_css = f'background-image: url("data:image/png;base64, {data}");'
     
     akzent = "#00d4ff"
     danger = "#ff4b4b"
@@ -77,7 +77,6 @@ def apply_titan_style(dark, bg_active):
         .stApp {{ {bg_css} background-size: cover; background-attachment: fixed; }}
         .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 80px !important; }}
         
-        /* BRANDING VERSTÄRKT */
         .copyright-branding {{
             position: absolute;
             bottom: 30px;
@@ -103,14 +102,13 @@ def apply_titan_style(dark, bg_active):
         div.stButton > button[kind="primary"] {{ background: linear-gradient(90deg, #550000, {danger}) !important; }}
         
         /* SIDEBAR FEEDBACK */
-        .feedback-sidebar-container {{ position: absolute; bottom: 20px; width: 90%; text-align: center; }}
-        .feedback-sidebar-btn {{ font-size: 0.7rem !important; height: 2rem !important; opacity: 0.7; }}
+        .feedback-sidebar-btn {{ font-size: 0.5rem !important; height: 1.5rem !important; opacity: 0.5; }}
         </style>
         <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V14.0", layout="wide")
+st.set_page_config(page_title="TITAN V15.0", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
 bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
@@ -132,7 +130,7 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 14.0 // Goldstandard")
+st.caption("Version 15.0 // Usability Edition")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
@@ -208,7 +206,13 @@ if start_btn:
                 alle_geoms = []
                 
                 for item in items:
-                    folium.GeoJson(item["gdf"], style_function=lambda x: {'color':'#ff0055','weight':8}).add_to(m)
+                    # --- MOUSE-OVER FÜR STRASSENNAME ---
+                    folium.GeoJson(
+                        item["gdf"],
+                        style_function=lambda x: {'color':'#ff0055','weight':8},
+                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:'])
+                    ).add_to(m)
+                    
                     alle_geoms.append(item["gdf"])
                     
                     if any(c.isdigit() for c in item["name"]):
@@ -220,7 +224,7 @@ if start_btn:
                 # --- ZOOM: KORRIGIERT AUF BESTE ÜBERSICHT ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
-                    # Erhöht den Padding-Wert (z.B. 0.05), um weiter rauszuzoomen
+                    # Erhöhter Padding-Wert für mehr Umgebung
                     m.fit_bounds(combined_gdf.total_bounds[[1, 0, 3, 2]].tolist(), padding=(0.05, 0.05))
                 
                 html_map = m._repr_html_()
