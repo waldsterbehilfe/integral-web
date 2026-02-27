@@ -1,40 +1,21 @@
 import streamlit as st
 import osmnx as ox
 import folium
-import io, base64, os, re, time
+import io, zipfile, base64, os, re
 import pandas as pd
 from collections import defaultdict
-from folium.plugins import Fullscreen
+from datetime import datetime
 
-# --- 1. ENGINE & ROBUSTER CACHE ---
-CACHE_ZIP = "geocache.zip"
+# --- 1. SETUP & CONFIG ---
+st.set_page_config(page_title="MAPMARKER 3000", layout="wide")
+
+# Cache für OSMNX Daten, um Anfragen zu minimieren
 CACHE_DIR = "geocache"
+if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
+ox.settings.use_cache = True
+ox.settings.cache_folder = f"./{CACHE_DIR}"
 
-@st.cache_resource
-def power_up_engine():
-    """Initialisiert den Cache und entpackt Zips."""
-    vorher = 0
-    if os.path.exists(CACHE_DIR):
-        vorher = len(os.listdir(CACHE_DIR))
-        
-    if os.path.exists(CACHE_ZIP):
-        try:
-            with zipfile.ZipFile(CACHE_ZIP, 'r') as zip_ref:
-                zip_ref.extractall(".")
-        except:
-            pass
-            
-    if os.path.exists(CACHE_DIR):
-        ox.settings.use_cache = True
-        ox.settings.cache_folder = f"./{CACHE_DIR}"
-        nachher = len(os.listdir(CACHE_DIR))
-        diff = nachher - vorher
-        return nachher, diff
-    return 0, 0
-
-cache_total, cache_neu = power_up_engine()
-
-# --- 2. INTELLIGENTE TEXT-KORREKTUR ---
+# --- 2. HILFSFUNKTIONEN ---
 def bereinige_adresse(text):
     t = text.strip()
     t = re.sub(r'(?i)\bstr\b\.?', 'Straße', t)
@@ -44,186 +25,136 @@ def bereinige_adresse(text):
     t = re.sub(r'\s+', ' ', t)
     return t
 
-# --- 3. UI HELPER ---
-def apply_titan_style(dark, bg_active):
+def apply_custom_style(dark_mode):
+    # Einfaches CSS für Branding und Farben
     akzent = "#00d4ff"
     danger = "#ff4b4b"
-    panel_bg = "rgba(10, 10, 15, 0.85)" if dark else "rgba(240, 242, 246, 0.9)"
-    text_col = "#ffffff" if dark else "#2c3e50"
-
-    # --- KONFIGURATION FÜR MAIL ---
-    EMAIL_ADRESSE = "deine.email@beispiel.de" # <-- HIER ANPASSEN
-    MAIL_LINK = f"mailto:{EMAIL_ADRESSE}?subject=Feedback%20zu%20Titan%20Mapmarker"
-
     st.markdown(f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
         .copyright-branding {{
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 0.9rem;
+            bottom: 10px;
+            right: 10px;
+            font-family: sans-serif;
+            font-size: 0.8rem;
             color: {akzent};
             text-decoration: none;
-            transition: all 0.3s ease;
-            text-shadow: 0 0 10px rgba(0,212,255,0.5);
-            letter-spacing: 2px;
             z-index: 1000;
         }}
-        .copyright-branding:hover {{ color: #ffffff; text-shadow: 0 0 15px #ffffff; }}
-        
-        .stButton button {{ width: 100%; height: 3.5rem; border-radius: 15px; background: linear-gradient(90deg, #0055ff, #00d4ff) !important; font-family: 'Orbitron'; font-size: 1rem; border: none; }}
-        div.stButton > button[kind="primary"] {{ background: linear-gradient(90deg, #550000, {danger}) !important; }}
+        .stButton button {{ width: 100%; border-radius: 10px; }}
         </style>
-        <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
+        <a href="#" class="copyright-branding">© 2026 Maus Industries</a>
     """, unsafe_allow_html=True)
 
-# --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V17.0", layout="wide")
-ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
-apply_titan_style(ist_dunkel, True)
+# --- 3. UI LAYOUT ---
+# Sidebar
+st.sidebar.title("🛠️ Konfiguration")
+dark_mode = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
+apply_custom_style(dark_mode)
 
-# --- SIDEBAR FEEDBACK (Ganz unten & klein) ---
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Feedback")
-col_f1, col_f2 = st.sidebar.columns(2)
-with col_f1:
-    if st.button("👍", key="like_sb"):
-        st.sidebar.success("Danke!")
-with col_f2:
-    if st.button("👎", key="dislike_sb"):
-        st.sidebar.warning("Verbesserung läuft!")
-st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Status")
+cache_files = sum([len(files) for r, d, files in os.walk(CACHE_DIR)])
+st.sidebar.metric("Cache Einträge", cache_files)
 
-st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 17.0 // HTML Report Edition")
+# Hauptbereich
+st.title("🗺️ MAPMARKER 3000")
+st.caption("Sortiere Straßen nach Ortsteilen im Landkreis Marburg-Biedenkopf")
 
-input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
+uploaded_file = st.file_uploader("📥 Lade deine Straßenliste (.txt) hoch", type=["txt"])
 
-col1, col2 = st.columns([4, 1])
-with col1:
-    start_btn = st.button("🚀 HTML-REPORT GENERIEREN")
-with col2:
-    abort_btn = st.button("🛑 ABBRECHEN", type="primary")
-
-# --- PROZESS LOGIK ---
-if start_btn:
-    if input_text:
-        rohe_eintraege = [s.strip() for s in input_text.split('\n') if s.strip()]
-        gesamt = len(rohe_eintraege)
+# --- 4. VERARBEITUNG ---
+if uploaded_file is not None:
+    # Textdatei einlesen
+    stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+    strassen = [s.strip() for s in stringio if s.strip()]
+    
+    total = len(strassen)
+    start_btn = st.button("🚀 Suche starten")
+    
+    if start_btn:
+        ort_sammlung = defaultdict(list)
+        errors = []
         
-        results_by_district = defaultdict(list)
-        fehler = []
+        status_text = st.empty()
+        progress_bar = st.progress(0)
         
-        status_box = st.empty()
-        prog_bar = st.progress(0)
-        
-        for i, roh_eintrag in enumerate(rohe_eintraege):
-            if abort_btn:
-                st.warning("⚠️ PROZESS ABGEBROCHEN")
-                break
-                
-            aktuelle_nr = i + 1
-            eintrag = bereinige_adresse(roh_eintrag)
-            
-            status_box.markdown(f"ANALYSE: {aktuelle_nr} / {gesamt} — <b>{eintrag}</b>", unsafe_allow_html=True)
-            prog_bar.progress(aktuelle_nr / gesamt)
+        for i, strasse in enumerate(strassen):
+            status_text.text(f"🔍 Suche: {strasse} ({i+1}/{total})")
             
             try:
-                q = f"{eintrag}, Landkreis Marburg-Biedenkopf, Germany"
-                gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
+                # Suche
+                query = f"{strasse}, Landkreis Marburg-Biedenkopf, Germany"
+                gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
                 
                 if not gdf.empty:
-                    ortsteil = "Unbekannt"
-                    for key in ['addr:suburb', 'suburb', 'addr:city', 'municipality', 'county']:
-                        if key in gdf.columns:
-                            val = gdf[key].dropna().unique()
-                            if len(val) > 0:
-                                ortsteil = val[0]
+                    gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
+                    gdf_f = gdf[gdf['name'].str.contains(strasse, case=False, na=False)] if 'name' in gdf.columns else gdf
+                    
+                    if not gdf_f.empty:
+                        # Ortserkennung
+                        stadt_info = "Unbekannter_Ort"
+                        for col in ['addr:suburb', 'addr:city', 'municipality', 'city']:
+                            if col in gdf_f.columns and gdf_f[col].dropna().any():
+                                stadt_info = gdf_f[col].dropna().iloc[0]
                                 break
-                    
-                    str_clean = re.sub(r'\s+\d+.*', '', eintrag)
-                    target = gdf[gdf['name'].str.contains(str_clean, case=False, na=False)] if 'name' in gdf.columns else gdf
-                    
-                    results_by_district[ortsteil].append({
-                        "name": eintrag,
-                        "gdf": target,
-                        "query": q
-                    })
-                else: fehler.append(roh_eintrag)
-            except:
-                fehler.append(roh_eintrag)
-                continue
-        
-        status_box.empty()
-        prog_bar.empty()
-
-        # --- HTML GENERIERUNG ---
-        if results_by_district:
-            # HTML Header & CSS
-            html_content = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Titan Map Report</title>
-                <style>
-                    body { font-family: 'Rajdhani', sans-serif; background-color: #0a0a0f; color: white; padding: 20px; }
-                    .container { max-width: 1200px; margin: 0 auto; }
-                    .district-box { background-color: #1a1a2e; border: 1px solid #00d4ff; border-radius: 20px; padding: 20px; margin-bottom: 30px; }
-                    h1 { color: #00d4ff; font-family: 'Orbitron', sans-serif; }
-                    .map-wrapper { width: 100%; height: 500px; margin-top: 10px; }
-                </style>
-            </head>
-            <body>
-            <div class="container">
-                <h1>TITAN MAP REPORT</h1>
-            """
+                        
+                        ort_sammlung[stadt_info].append({"gdf": gdf_f, "name": strasse, "query": query})
+                    else: errors.append(f"Nicht eindeutig: {strasse}")
+                else: errors.append(f"Fehlt: {strasse}")
+            except Exception as e:
+                errors.append(f"Fehler bei {strasse}: {str(e)}")
             
-            for ortsteil, items in results_by_district.items():
-                html_content += f'<div class="district-box"><h2>📍 {ortsteil}</h2>'
+            progress_bar.progress((i + 1) / total)
+
+        status_text.text("🎨 Karten werden erstellt...")
+        
+        # --- 5. DARSTELLUNG & ZIP GENERIERUNG ---
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            
+            for ort, items in ort_sammlung.items():
+                st.subheader(f"📍 {ort}")
                 
-                m = folium.Map(tiles='openstreetmap')
+                # Karte erstellen
+                m = folium.Map(tiles='cartodbdark_matter' if dark_mode else 'cartodbpositron')
                 alle_geoms = []
                 
                 for item in items:
-                    tooltip_fields = ['name'] if 'name' in item["gdf"].columns else []
-                    folium.GeoJson(
-                        item["gdf"],
-                        style_function=lambda x: {'color':'#ff0055','weight':8},
-                        tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=['Straße:']) if tooltip_fields else None
-                    ).add_to(m)
-                    
+                    folium.GeoJson(item["gdf"], style_function=lambda x: {'color':'red','weight':6}).add_to(m)
                     alle_geoms.append(item["gdf"])
                     
+                    # Fähnchen für Hausnummer
                     if any(c.isdigit() for c in item["name"]):
                         p_gdf = ox.geocode_to_gdf(item["query"])
                         if not p_gdf.empty:
                             loc = p_gdf.iloc[0].geometry.centroid
                             folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='info-sign')).add_to(m)
                 
+                # Zoom auf Objekte
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
                     bounds = combined_gdf.total_bounds
-                    if not combined_gdf.empty:
-                        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
+                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 
-                # Karte in HTML einbetten
-                m.get_root().width = "100%"
-                m.get_root().height = "500px"
-                map_html = m._repr_html_()
-                html_content += f'<div class="map-wrapper">{map_html}</div>'
-                html_content += '</div>'
-            
-            html_content += '</body></html>'
-            
-            # Download Button
-            st.download_button(
-                label="📥 HTML-REPORT HERUNTERLADEN",
-                data=html_content,
-                file_name=f"Titan_Map_Report_{time.strftime('%Y%m%d_%H%M')}.html",
-                mime="text/html"
-            )
-            
-        if fehler:
-            st.error(f"Nicht gefunden: {', '.join(fehler)}")
+                # Im Streamlit anzeigen
+                st.components.v1.html(m._repr_html_(), height=500)
+                
+                # In ZIP für Download speichern
+                safe_ort = "".join([c for c in ort if c.isalnum() or c in " _-"])
+                zip_file.writestr(f"Karte_{safe_ort}.html", m._repr_html_())
+        
+        # Download Button
+        st.download_button(
+            label="📥 Karten als ZIP herunterladen",
+            data=zip_buffer.getvalue(),
+            file_name=f"Karten_{datetime.now().strftime('%H%M')}.zip",
+            mime="application/zip"
+        )
+        
+        if errors:
+            with st.expander("⚠️ Fehler-Log anzeigen"):
+                for err in errors: st.write(err)
+
+else:
+    st.info("Bitte lade eine .txt Datei mit Straßennamen hoch.")
