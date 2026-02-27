@@ -77,19 +77,20 @@ def apply_titan_style(dark, bg_active):
         .stApp {{ {bg_css} background-size: cover; background-attachment: fixed; }}
         .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 80px !important; }}
         
+        /* BRANDING VERSTÄRKT */
         .copyright-branding {{
             position: absolute;
-            bottom: 20px;
-            right: 30px;
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.4);
-            letter-spacing: 1px;
+            bottom: 30px;
+            right: 40px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1rem;
+            color: {akzent};
             text-decoration: none;
-            transition: color 0.3s ease;
+            transition: all 0.3s ease;
+            text-shadow: 0 0 10px rgba(0,212,255,0.5);
+            letter-spacing: 2px;
         }}
-        .copyright-branding:hover {{ color: {akzent}; }}
-        .copyright-branding b {{ color: {akzent}; }}
+        .copyright-branding:hover {{ color: #ffffff; text-shadow: 0 0 15px #ffffff; }}
         
         @keyframes rotate-vortex {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
         .vortex-loader {{ width: 40px; height: 40px; border: 3px solid transparent; border-top: 3px solid {akzent}; border-radius: 50%; display: inline-block; animation: rotate-vortex 1s linear infinite; margin-right: 15px; vertical-align: middle; box-shadow: 0 0 10px {akzent}; }}
@@ -101,28 +102,29 @@ def apply_titan_style(dark, bg_active):
         .stButton button {{ width: 100%; height: 3.5rem; border-radius: 15px; background: linear-gradient(90deg, #0055ff, #00d4ff) !important; font-family: 'Orbitron'; font-size: 1rem; border: none; }}
         div.stButton > button[kind="primary"] {{ background: linear-gradient(90deg, #550000, {danger}) !important; }}
         
-        /* KLENE FEEDBACK BUTTONS UNTEN */
-        .feedback-area {{ display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; opacity: 0.6; font-size: 0.8rem; }}
+        /* SIDEBAR FEEDBACK */
+        .feedback-sidebar-container {{ position: absolute; bottom: 20px; width: 90%; text-align: center; }}
+        .feedback-sidebar-btn {{ font-size: 0.7rem !important; height: 2rem !important; opacity: 0.7; }}
         </style>
-        <a href="{MAIL_LINK}" class="copyright-branding">Powered by <b>[DEIN NAME/FIRMA]</b> © 2026</a>
+        <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V13.1", layout="wide")
+st.set_page_config(page_title="TITAN V14.0", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
 bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
 
-# --- SIDEBAR FEEDBACK ---
+# --- SIDEBAR FEEDBACK (Ganz unten & klein) ---
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Gefällt dir TITAN?")
+st.sidebar.markdown("### Feedback")
 col_f1, col_f2 = st.sidebar.columns(2)
 with col_f1:
-    if st.button("👍 Like"):
+    if st.button("👍", key="like_sb"):
         st.sidebar.success("Danke!")
 with col_f2:
-    if st.button("👎 Dislike"):
-        st.sidebar.warning("Wir arbeiten dran!")
+    if st.button("👎", key="dislike_sb"):
+        st.sidebar.warning("Verbesserung läuft!")
 st.sidebar.markdown("---")
 
 if cache_neu > 0:
@@ -130,7 +132,7 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 13.1 // Ortsteil-Aggregator")
+st.caption("Version 14.0 // Goldstandard")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
@@ -146,7 +148,6 @@ if start_btn:
         rohe_eintraege = [s.strip() for s in input_text.split('\n') if s.strip()]
         gesamt = len(rohe_eintraege)
         
-        # --- DATEN ZWISCHENSPEICHERN ---
         results_by_district = defaultdict(list)
         fehler = []
         
@@ -185,7 +186,6 @@ if start_btn:
                     str_clean = re.sub(r'\s+\d+.*', '', eintrag)
                     target = gdf[gdf['name'].str.contains(str_clean, case=False, na=False)] if 'name' in gdf.columns else gdf
                     
-                    # --- DATEN NACH ORTSTEIL GRUPPIEREN ---
                     results_by_district[ortsteil].append({
                         "name": eintrag,
                         "gdf": target,
@@ -201,7 +201,6 @@ if start_btn:
 
         # Ergebnisse anzeigen
         if results_by_district:
-            # --- FENSTER PRO ORTSTEIL ---
             for ortsteil, items in results_by_district.items():
                 st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
                 
@@ -209,36 +208,27 @@ if start_btn:
                 alle_geoms = []
                 
                 for item in items:
-                    # Straßen des Ortsteils zeichnen
                     folium.GeoJson(item["gdf"], style_function=lambda x: {'color':'#ff0055','weight':8}).add_to(m)
                     alle_geoms.append(item["gdf"])
                     
-                    # Marker für Hausnummern
                     if any(c.isdigit() for c in item["name"]):
                         p_gdf = ox.geocode_to_gdf(item["query"])
                         if not p_gdf.empty:
                             loc = p_gdf.iloc[0].geometry.centroid
                             folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='flag')).add_to(m)
                 
-                # --- ZOOM: KORRIGIERT AUF ALLE STRASSEN DES ORTSTEILS ---
+                # --- ZOOM: KORRIGIERT AUF BESTE ÜBERSICHT ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
-                    m.fit_bounds(combined_gdf.total_bounds[[1, 0, 3, 2]].tolist())
+                    # Erhöht den Padding-Wert (z.B. 0.05), um weiter rauszuzoomen
+                    m.fit_bounds(combined_gdf.total_bounds[[1, 0, 3, 2]].tolist(), padding=(0.05, 0.05))
                 
                 html_map = m._repr_html_()
                 
-                # --- VOLLBILD LINK FÜR DEN ORTSTEIL ---
                 st.markdown(erzeuge_link(html_map, ortsteil), unsafe_allow_html=True)
                 st.components.v1.html(html_map, height=500)
                 
-                # --- FEEDBACK UNTEN ---
-                st.markdown('<div class="feedback-area">', unsafe_allow_html=True)
-                col_c1, col_c2 = st.columns([1, 10])
-                with col_c1:
-                    st.button("👍", key=f"like_{ortsteil}_{time.time()}")
-                with col_c2:
-                    st.button("👎", key=f"dislike_{ortsteil}_{time.time()}")
-                st.markdown('</div></div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
         
         if fehler:
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
