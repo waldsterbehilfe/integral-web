@@ -1,5 +1,7 @@
 libgdal-dev
+unixodbc
+unixodbc-dev
+unixodbc-common
 libodbc2
 libodbcinst2
-unixodbc
 g++
