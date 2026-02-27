@@ -1,9 +1,10 @@
 import streamlit as st
 import osmnx as ox
 import folium
-import io, zipfile, base64, os, re, time
+import io, base64, os, re, time
 import pandas as pd
 from collections import defaultdict
+from folium.plugins import Fullscreen
 
 # --- 1. ENGINE & ROBUSTER CACHE ---
 CACHE_ZIP = "geocache.zip"
@@ -44,28 +45,11 @@ def bereinige_adresse(text):
     return t
 
 # --- 3. UI HELPER ---
-def erzeuge_link(html_code, ortsteil):
-    b64 = base64.b64encode(html_code.encode()).decode()
-    return f'''<a href="data:text/html;base64,{b64}" target="_blank" style="text-decoration:none;">
-                <div style="background: linear-gradient(135deg, #00d4ff 0%, #0055ff 100%); 
-                color: white; padding: 10px; border-radius: 10px; text-align: center; 
-                font-weight: bold; font-family: 'Orbitron'; font-size: 0.9rem; margin-top: 10px;
-                box-shadow: 0 3px 10px rgba(0, 212, 255, 0.4);">
-                🖥️ VOLLBILD: {ortsteil.upper()}
-                </div></a>'''
-
 def apply_titan_style(dark, bg_active):
-    bg_css = ""
-    if bg_active and os.path.exists('hintergrund.png'):
-        with open('hintergrund.png', 'rb') as f:
-            data = base64.b64encode(f.read()).decode()
-        bg_css = f'background-image: url("data:image/png;base64, {data}");'
-    
     akzent = "#00d4ff"
     danger = "#ff4b4b"
     panel_bg = "rgba(10, 10, 15, 0.85)" if dark else "rgba(240, 242, 246, 0.9)"
     text_col = "#ffffff" if dark else "#2c3e50"
-    sub_bg = "rgba(0, 212, 255, 0.03)" if dark else "rgba(0, 85, 255, 0.03)"
 
     # --- KONFIGURATION FÜR MAIL ---
     EMAIL_ADRESSE = "deine.email@beispiel.de" # <-- HIER ANPASSEN
@@ -74,10 +58,6 @@ def apply_titan_style(dark, bg_active):
     st.markdown(f"""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
-        .stApp {{ {bg_css} background-size: cover; background-attachment: fixed; }}
-        .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 80px !important; }}
-        
-        /* BRANDING FIX */
         .copyright-branding {{
             position: fixed;
             bottom: 20px;
@@ -93,27 +73,16 @@ def apply_titan_style(dark, bg_active):
         }}
         .copyright-branding:hover {{ color: #ffffff; text-shadow: 0 0 15px #ffffff; }}
         
-        @keyframes rotate-vortex {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
-        .vortex-loader {{ width: 40px; height: 40px; border: 3px solid transparent; border-top: 3px solid {akzent}; border-radius: 50%; display: inline-block; animation: rotate-vortex 1s linear infinite; margin-right: 15px; vertical-align: middle; box-shadow: 0 0 10px {akzent}; }}
-        .status-container {{ background: rgba(0, 212, 255, 0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 212, 255, 0.3); margin-bottom: 20px; }}
-        
-        .ort-box-titan {{ background: {sub_bg}; border-radius: 25px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(0, 212, 255, 0.1); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }}
-        .titan-header {{ font-family: 'Orbitron'; color: {akzent}; font-size: 1.6rem; margin-bottom: 20px; text-shadow: 0 0 5px rgba(0,212,255,0.3); }}
-        
         .stButton button {{ width: 100%; height: 3.5rem; border-radius: 15px; background: linear-gradient(90deg, #0055ff, #00d4ff) !important; font-family: 'Orbitron'; font-size: 1rem; border: none; }}
         div.stButton > button[kind="primary"] {{ background: linear-gradient(90deg, #550000, {danger}) !important; }}
-        
-        /* SIDEBAR FEEDBACK */
-        .feedback-sidebar-btn {{ font-size: 0.5rem !important; height: 1.5rem !important; opacity: 0.5; }}
         </style>
         <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V16.0", layout="wide")
+st.set_page_config(page_title="TITAN V17.0", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
-bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
-apply_titan_style(ist_dunkel, bg_an)
+apply_titan_style(ist_dunkel, True)
 
 # --- SIDEBAR FEEDBACK (Ganz unten & klein) ---
 st.sidebar.markdown("---")
@@ -127,18 +96,14 @@ with col_f2:
         st.sidebar.warning("Verbesserung läuft!")
 st.sidebar.markdown("---")
 
-if cache_neu > 0:
-    st.sidebar.success(f"⚡ {cache_neu} neue Sektoren geladen!")
-st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
-
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 16.0 // Clean Edition")
+st.caption("Version 17.0 // HTML Report Edition")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
 col1, col2 = st.columns([4, 1])
 with col1:
-    start_btn = st.button("🚀 SYSTEM-ANALYSE STARTEN")
+    start_btn = st.button("🚀 HTML-REPORT GENERIEREN")
 with col2:
     abort_btn = st.button("🛑 ABBRECHEN", type="primary")
 
@@ -162,19 +127,11 @@ if start_btn:
             aktuelle_nr = i + 1
             eintrag = bereinige_adresse(roh_eintrag)
             
-            status_box.markdown(f"""
-                <div class="status-container">
-                    <div class="vortex-loader"></div>
-                    <span style="font-family:'Orbitron'; color:#00d4ff; font-size:1rem;">
-                        ANALYSE: {aktuelle_nr} / {gesamt} — <b>{eintrag}</b>
-                    </span>
-                </div>
-            """, unsafe_allow_html=True)
+            status_box.markdown(f"ANALYSE: {aktuelle_nr} / {gesamt} — <b>{eintrag}</b>", unsafe_allow_html=True)
             prog_bar.progress(aktuelle_nr / gesamt)
             
             try:
                 q = f"{eintrag}, Landkreis Marburg-Biedenkopf, Germany"
-                # POI entfernen: tags={"highway": True} ist korrekt, dist weiter
                 gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
                 
                 if not gdf.empty:
@@ -202,20 +159,35 @@ if start_btn:
         status_box.empty()
         prog_bar.empty()
 
-        # Ergebnisse anzeigen
+        # --- HTML GENERIERUNG ---
         if results_by_district:
+            # HTML Header & CSS
+            html_content = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Titan Map Report</title>
+                <style>
+                    body { font-family: 'Rajdhani', sans-serif; background-color: #0a0a0f; color: white; padding: 20px; }
+                    .container { max-width: 1200px; margin: 0 auto; }
+                    .district-box { background-color: #1a1a2e; border: 1px solid #00d4ff; border-radius: 20px; padding: 20px; margin-bottom: 30px; }
+                    h1 { color: #00d4ff; font-family: 'Orbitron', sans-serif; }
+                    .map-wrapper { width: 100%; height: 500px; margin-top: 10px; }
+                </style>
+            </head>
+            <body>
+            <div class="container">
+                <h1>TITAN MAP REPORT</h1>
+            """
+            
             for ortsteil, items in results_by_district.items():
-                st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
+                html_content += f'<div class="district-box"><h2>📍 {ortsteil}</h2>'
                 
-                # --- ORIGINAL FARBEN WIEDERHERSTELLEN ---
-                # tiles='openstreetmap' für Standardfarben
                 m = folium.Map(tiles='openstreetmap')
                 alle_geoms = []
                 
                 for item in items:
-                    # TOOLTIP SICHERHEITS-CHECK
                     tooltip_fields = ['name'] if 'name' in item["gdf"].columns else []
-                    
                     folium.GeoJson(
                         item["gdf"],
                         style_function=lambda x: {'color':'#ff0055','weight':8},
@@ -224,31 +196,34 @@ if start_btn:
                     
                     alle_geoms.append(item["gdf"])
                     
-                    # --- BLAUES FÄHNE FÜR HAUSNUMMER ---
                     if any(c.isdigit() for c in item["name"]):
                         p_gdf = ox.geocode_to_gdf(item["query"])
                         if not p_gdf.empty:
                             loc = p_gdf.iloc[0].geometry.centroid
-                            # Blauer Marker
-                            folium.Marker(
-                                [loc.y, loc.x], 
-                                icon=folium.Icon(color='blue', icon='info-sign'),
-                                popup=item["name"]
-                            ).add_to(m)
+                            folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='info-sign')).add_to(m)
                 
-                # --- ZOOM: VERBESSERTE LOGIK ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
                     bounds = combined_gdf.total_bounds
                     if not combined_gdf.empty:
                         m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 
-                html_map = m._repr_html_()
-                
-                st.markdown(erzeuge_link(html_map, ortsteil), unsafe_allow_html=True)
-                st.components.v1.html(html_map, height=500)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-        
+                # Karte in HTML einbetten
+                m.get_root().width = "100%"
+                m.get_root().height = "500px"
+                map_html = m._repr_html_()
+                html_content += f'<div class="map-wrapper">{map_html}</div>'
+                html_content += '</div>'
+            
+            html_content += '</body></html>'
+            
+            # Download Button
+            st.download_button(
+                label="📥 HTML-REPORT HERUNTERLADEN",
+                data=html_content,
+                file_name=f"Titan_Map_Report_{time.strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html"
+            )
+            
         if fehler:
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
