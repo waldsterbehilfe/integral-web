@@ -110,7 +110,7 @@ def apply_titan_style(dark, bg_active):
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V15.1", layout="wide")
+st.set_page_config(page_title="TITAN V15.2", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
 bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
@@ -132,7 +132,7 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 15.1 // Fix & Stability")
+st.caption("Version 15.2 // Tooltip Fix")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
@@ -177,7 +177,6 @@ if start_btn:
                 gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
                 
                 if not gdf.empty:
-                    # Bessere Ermittlung des Ortsteils
                     ortsteil = "Unbekannt"
                     for key in ['addr:suburb', 'suburb', 'addr:city', 'municipality', 'county']:
                         if key in gdf.columns:
@@ -207,15 +206,17 @@ if start_btn:
             for ortsteil, items in results_by_district.items():
                 st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
                 
-                # --- MAP INITIALISIERUNG ---
                 m = folium.Map(tiles='cartodbdark_matter' if ist_dunkel else 'cartodbpositron')
                 alle_geoms = []
                 
                 for item in items:
+                    # --- TOOLTIP SICHERHEITS-CHECK ---
+                    tooltip_fields = ['name'] if 'name' in item["gdf"].columns else []
+                    
                     folium.GeoJson(
                         item["gdf"],
                         style_function=lambda x: {'color':'#ff0055','weight':8},
-                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:'])
+                        tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=['Straße:']) if tooltip_fields else None
                     ).add_to(m)
                     
                     alle_geoms.append(item["gdf"])
@@ -229,9 +230,10 @@ if start_btn:
                 # --- ZOOM: VERBESSERTE LOGIK ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
-                    # bounds in [miny, minx, maxy, maxx] konvertieren
                     bounds = combined_gdf.total_bounds
-                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
+                    # Sicherstellen, dass bounds existieren
+                    if not combined_gdf.empty:
+                        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 
                 html_map = m._repr_html_()
                 
