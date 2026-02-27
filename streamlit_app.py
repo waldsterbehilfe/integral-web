@@ -1,95 +1,89 @@
+
 import streamlit as st
 import osmnx as ox
 import folium
-from streamlit_folium import st_folium
 from collections import defaultdict
 import io
 import zipfile
 from datetime import datetime
 
-# --- 1. DESIGN & STYLING ---
-st.set_page_config(page_title="INTEGRAL - Kartengenerator", page_icon="🗺️", layout="centered")
+# --- SETUP ---
+st.set_page_config(page_title="INTEGRAL", layout="centered")
 
-# CSS für den Gold-Look
+# Design
 st.markdown("""
     <style>
-    .stApp { background-color: #f5f7f9; }
-    .stButton>button {
-        background-color: #1976d2;
-        color: white;
-        border-radius: 5px;
-        height: 3em;
-        width: 100%;
-        font-weight: bold;
-        border: none;
-    }
-    .footer { font-size: 12px; color: #95a5a6; text-align: right; font-style: italic; margin-top: 50px; }
+    .stApp { background-color: #f8f9fa; }
+    .stButton>button { background-color: #1976d2; color: white; width: 100%; font-weight: bold; border-radius: 5px; border: none; height: 3em; }
+    .footer { font-size: 10px; color: gray; text-align: right; margin-top: 50px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. INHALT ---
 st.title("🗺️ INTEGRAL")
-st.subheader("Automatischer Kartengenerator (Marburg-Biedenkopf)")
+st.caption("Professioneller Kartengenerator | v3.0")
 
-# Eingabefeld
-input_text = st.text_area("Straßenliste hier einfügen (eine pro Zeile):", height=180, placeholder="Hauptstraße\nSchulgasse...")
+# Eingabe
+input_text = st.text_area("Straßenliste hier einfügen:", height=200, placeholder="Am Markt\nSchloßstraße 1\n...")
 
-if st.button("VERARBEITEN & KARTEN ERSTELLEN"):
+if st.button("KARTEN JETZT GENERIEREN"):
     strassen = [s.strip() for s in input_text.split('\n') if s.strip()]
     
-    if not strassen:
-        st.error("Bitte gib zuerst Straßen ein.")
-    else:
-        # Cache-Verzeichnis sicherstellen
+    if strassen:
+        # Cache Logik
         ox.settings.use_cache = True
         ox.settings.cache_folder = "./geocache"
         
-        with st.status("⚙️ Arbeite für dich... bitte warten", expanded=True) as status:
-            ort_sammlung = defaultdict(list)
-            
-            for i, strasse in enumerate(strassen):
-                try:
-                    # Suche im Landkreis Marburg-Biedenkopf
-                    query = f"{strasse}, Landkreis Marburg-Biedenkopf, Germany"
-                    gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
+        ort_sammlung = defaultdict(list)
+        progress = st.progress(0)
+        status_msg = st.empty()
+        
+        for i, strasse in enumerate(strassen):
+            status_msg.text(f"Verarbeite: {strasse}...")
+            try:
+                # Suche im Landkreis
+                query = f"{strasse}, Landkreis Marburg-Biedenkopf, Germany"
+                gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
+                
+                if not gdf.empty:
+                    # Ortsteilerkennung
+                    stadt = "Unbekannt"
+                    for col in ['addr:suburb', 'addr:city', 'municipality', 'city']:
+                        if col in gdf.columns and gdf[col].dropna().any():
+                            stadt = gdf[col].dropna().iloc[0]
+                            break
                     
-                    if not gdf.empty:
-                        gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
-                        
-                        # Ortsteilerkennung
-                        stadt = "Unbekannt"
-                        for col in ['addr:suburb', 'addr:city', 'municipality']:
-                            if col in gdf.columns and gdf[col].dropna().any():
-                                stadt = gdf[col].dropna().iloc[0]
-                                break
-                        
-                        geo_json = folium.GeoJson(gdf, style_function=lambda x: {'color':'red','weight':6})
-                        ort_sammlung[stadt].append(geo_json)
-                except:
-                    continue
-            
-            status.update(label="✅ Fertig!", state="complete", expanded=False)
+                    # Karten-Element
+                    geo_json = folium.GeoJson(gdf, style_function=lambda x: {'color':'red','weight':6})
+                    ort_sammlung[stadt].append(geo_json)
+            except:
+                continue
+            progress.progress((i + 1) / len(strassen))
 
-        # Download-Bereich
         if ort_sammlung:
+            status_msg.success(f"Erfolg! {len(ort_sammlung)} Ortsteile gefunden.")
             st.balloons()
+            
+            # ZIP erstellen
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
                 for ort, elemente in ort_sammlung.items():
+                    # Karte zentrieren (Marburg Fokus)
                     m = folium.Map(location=[50.81, 8.77], zoom_start=13)
                     for el in elemente:
                         el.add_to(m)
                     
-                    # HTML der Karte in die ZIP
-                    zf.writestr(f"Karte_{ort}.html", m._repr_html_())
+                    safe_ort = "".join([c for c in ort if c.isalnum() or c in " _-"])
+                    zf.writestr(f"Karte_{safe_ort}.html", m._repr_html_())
             
             st.download_button(
-                label="📥 KARTEN-PAKET (ZIP) HERUNTERLADEN",
-                data=zip_buffer.getvalue(),
+                label="📥 FERTIGES PAKET HERUNTERLADEN (ZIP)", 
+                data=zip_buffer.getvalue(), 
                 file_name=f"Karten_{datetime.now().strftime('%H%M')}.zip",
                 mime="application/zip"
             )
         else:
-            st.error("Keine Ergebnisse für diese Straßen gefunden.")
+            status_msg.error("Keine Ergebnisse gefunden. Bitte Schreibweise prüfen.")
+    else:
+        st.warning("Bitte gib zuerst mindestens eine Straße ein.")
 
-st.markdown("<div class='footer'>© Maus | INTEGRAL Engine v3.0</div>", unsafe_allow_html=True)
+st.markdown("<div class='footer'>© Maus | INTEGRAL Engine</div>", unsafe_allow_html=True)
