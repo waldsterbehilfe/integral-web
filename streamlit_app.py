@@ -55,8 +55,8 @@ st.sidebar.markdown("### 📊 Status")
 cache_files = sum([len(files) for r, d, files in os.walk(CACHE_DIR)])
 st.sidebar.metric("Cache Einträge", cache_files)
 
-st.title("🗺️ MAPMARKER 3000 — ROBUST")
-st.caption("Sortiere Straßen nach Ortsteilen // Landkreis Marburg-Biedenkopf")
+st.title("🗺️ MAPMARKER 3000 — LANDKREIS")
+st.caption("Fokus: Landkreis Marburg-Biedenkopf // Strikter Geofence")
 
 uploaded_file = st.file_uploader("📥 Lade deine Straßenliste (.txt) hoch", type=["txt"])
 
@@ -66,7 +66,7 @@ if uploaded_file is not None:
     strassen = [s.strip() for s in stringio if s.strip()]
     
     total = len(strassen)
-    start_btn = st.button("🚀 Suche starten")
+    start_btn = st.button("🚀 Suche im Landkreis")
     
     if start_btn:
         ort_sammlung = defaultdict(list)
@@ -75,43 +75,40 @@ if uploaded_file is not None:
         status_text = st.empty()
         progress_bar = st.progress(0)
         
+        # Geofencing: Definition des Landkreises
+        LANDKREIS_NAME = "Landkreis Marburg-Biedenkopf"
+        
         for i, strasse in enumerate(strassen):
             status_text.text(f"🔍 Suche: {strasse} ({i+1}/{total})")
             
             eintrag = bereinige_adresse(strasse)
             
-            # --- ROBUSTE SUCHE MIT FALLBACK ---
-            gefunden = False
+            # --- SUCHE MIT STRIKTER LANDKREIS-BINDUNG ---
+            query = f"{eintrag}, {LANDKREIS_NAME}, Germany"
             
-            # Versuch 1: Spezifisch (Landkreis)
-            queries = [
-                f"{eintrag}, Landkreis Marburg-Biedenkopf, Germany",
-                f"{eintrag}, Germany" # Versuch 2: Allgemein
-            ]
-            
-            for q in queries:
-                try:
-                    gdf = ox.features_from_address(q, tags={"highway": True}, dist=800)
-                    if not gdf.empty:
-                        gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
-                        gdf_f = gdf[gdf['name'].str.contains(eintrag, case=False, na=False)] if 'name' in gdf.columns else gdf
-                        
-                        if not gdf_f.empty:
-                            # Ortserkennung
-                            stadt_info = "Unbekannter_Ort"
-                            for col in ['addr:suburb', 'addr:city', 'municipality', 'city']:
-                                if col in gdf_f.columns and gdf_f[col].dropna().any():
-                                    stadt_info = gdf_f[col].dropna().iloc[0]
+            try:
+                # Suche mit vergrößertem Radius für bessere Trefferquote innerhalb des Landkreises
+                gdf = ox.features_from_address(query, tags={"highway": True}, dist=2000)
+                
+                if not gdf.empty:
+                    gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
+                    gdf_f = gdf[gdf['name'].str.contains(eintrag, case=False, na=False)] if 'name' in gdf.columns else gdf
+                    
+                    if not gdf_f.empty:
+                        # Ortserkennung im Landkreis
+                        stadt_info = "Sonstiges_Landkreis"
+                        for col in ['addr:suburb', 'addr:city', 'municipality', 'city', 'county']:
+                            if col in gdf_f.columns and gdf_f[col].dropna().any():
+                                val = gdf_f[col].dropna().iloc[0]
+                                if LANDKREIS_NAME not in val: # Ortsteil priorisieren
+                                    stadt_info = val
                                     break
-                            
-                            ort_sammlung[stadt_info].append({"gdf": gdf_f, "name": eintrag, "query": q})
-                            gefunden = True
-                            break # Suche beenden bei Erfolg
-                except:
-                    continue
-            
-            if not gefunden:
-                errors.append(f"Nicht gefunden: {strasse}")
+                        
+                        ort_sammlung[stadt_info].append({"gdf": gdf_f, "name": eintrag, "query": query})
+                    else: errors.append(f"Nicht eindeutig: {strasse}")
+                else: errors.append(f"Nicht im Landkreis: {strasse}")
+            except Exception as e:
+                errors.append(f"Fehler bei {strasse}: {str(e)}")
             
             progress_bar.progress((i + 1) / total)
 
@@ -133,6 +130,7 @@ if uploaded_file is not None:
                     
                     if any(c.isdigit() for c in item["name"]):
                         try:
+                            # Geocode erneut mit Landkreis-Bezug
                             p_gdf = ox.geocode_to_gdf(item["query"])
                             if not p_gdf.empty:
                                 loc = p_gdf.iloc[0].geometry.centroid
