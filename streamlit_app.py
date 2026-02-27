@@ -21,7 +21,21 @@ def power_up_engine():
 
 cache_count = power_up_engine()
 
-# --- 2. THE "ULTIMATE" DESIGN ENGINE ---
+# --- 2. MULTI-AUDIO LOGIK ---
+def play_audio(sound_type="success"):
+    # Links zu den Sounds
+    sounds = {
+        "success": "https://codeskulptor-demos.commondatastorage.googleapis.com/descent/gotitem.mp3",
+        "fail": "https://www.myinstants.com/media/sounds/nelson-haha.mp3" # Der "Nananaaa" / Ha-Ha Effekt
+    }
+    audio_html = f"""
+    <audio autoplay>
+      <source src="{sounds[sound_type]}" type="audio/mpeg">
+    </audio>
+    """
+    st.components.v1.html(audio_html, height=0)
+
+# --- 3. THE "ULTIMATE" DESIGN ENGINE ---
 def apply_ultra_style(dark_mode, show_bg):
     bg_img = ""
     if show_bg and os.path.exists('hintergrund.png'):
@@ -30,102 +44,45 @@ def apply_ultra_style(dark_mode, show_bg):
         bg_img = f'background-image: url("data:image/png;base64,{data}");'
     
     accent_color = "#00d4ff" if dark_mode else "#1976d2"
-    panel_bg = "rgba(10, 10, 10, 0.6)" if dark_mode else "rgba(255, 255, 255, 0.6)"
+    panel_bg = "rgba(10, 10, 10, 0.7)" if dark_mode else "rgba(255, 255, 255, 0.75)"
     
     st.markdown(f"""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
-        
-        .stApp {{
-            {bg_img}
-            background-size: cover;
-            background-attachment: fixed;
-            background-position: center;
+        .stApp {{ {bg_img} background-size: cover; background-attachment: fixed; background-position: center; }}
+        .block-container {{ 
+            background: {panel_bg}; backdrop-filter: blur(25px); border-radius: 30px; padding: 3rem !important;
+            margin-top: 2rem; border: 1px solid rgba(255, 255, 255, 0.1); 
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
         }}
-        
-        .block-container {{
-            background: {panel_bg};
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 30px;
-            padding: 3rem !important;
-            margin-top: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.6);
-        }}
-        
-        .ort-container {{
-            background: rgba(0, 212, 255, 0.03);
-            border-left: 5px solid {accent_color};
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 30px;
-            transition: 0.3s;
-        }}
-        
-        .ort-container:hover {{
-            background: rgba(0, 212, 255, 0.07);
-            transform: translateX(5px);
-        }}
-
-        h1, h2, h3 {{
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 2px;
-            color: {accent_color} !important;
-            text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
-        }}
-        
-        .stButton>button {{
-            background: linear-gradient(90deg, {accent_color}, #0055ff);
-            color: white;
-            border: none;
-            border-radius: 12px;
-            padding: 0.75rem;
-            font-weight: bold;
-            transition: 0.3s;
-            text-transform: uppercase;
-        }}
-        
-        .stButton>button:hover {{
-            box-shadow: 0 0 20px {accent_color};
-            transform: scale(1.02);
-        }}
+        .ort-container {{ border-left: 5px solid {accent_color}; background: rgba(0, 212, 255, 0.05); border-radius: 15px; padding: 25px; margin-bottom: 30px; }}
+        h1, h2, h3 {{ font-family: 'Orbitron', sans-serif; color: {accent_color} !important; text-transform: uppercase; }}
+        .stButton>button {{ background: linear-gradient(90deg, {accent_color}, #0055ff); color: white; border-radius: 15px; font-weight: bold; border: none; height: 3.5em; }}
         </style>
     """, unsafe_allow_html=True)
 
-st.set_page_config(page_title="MAPMARKER 3000 ULTIMATE", layout="wide")
+st.set_page_config(page_title="MAPMARKER 3000 GOLD", layout="wide")
 
-# Sidebar - Command Center
+# Sidebar
 st.sidebar.markdown(f"<h2 style='text-align:center;'>🚀 COMMAND</h2>", unsafe_allow_html=True)
 is_dark = st.sidebar.toggle("Cyber Mode", value=True)
 show_bg = st.sidebar.toggle("Visualizer", value=True)
 apply_ultra_style(is_dark, show_bg)
+st.sidebar.metric("Database", f"{cache_count} Streets")
 
-st.sidebar.divider()
-st.sidebar.metric("Database", f"{cache_count} Streets", help="Anzahl der lokal gespeicherten Straßendaten.")
-
-# Main UI
 st.title("MAPMARKER 3000")
-st.caption("Ultimate Gold Edition // Automated Mapping System")
+st.caption("Ultimate Gold Edition // Intelligent Audio Feedback")
 
-# Clipboard Magic
-cb_col1, cb_col2 = st.columns([2, 1])
-with cb_col1:
-    input_text = st.text_area("TARGET INPUT", height=150, placeholder="Eingabe hier oder Button nutzen...")
-with cb_col2:
-    st.markdown("<br>", unsafe_allow_html=True)
-    clipboard_js = """<script>async function p(){const t=await navigator.clipboard.readText();const a=window.parent.document.querySelector('textarea');if(a){a.value=t;a.dispatchEvent(new Event('input',{{bubbles:true}}));}}</script><button onclick="p()" style="background:rgba(0,212,255,0.1); color:#00d4ff; border:1px solid #00d4ff; padding:15px; border-radius:12px; cursor:pointer; width:100%; font-family:'Orbitron'; font-weight:bold;">📋 SYNC CLIPBOARD</button>"""
-    st.components.v1.html(clipboard_js, height=80)
-    if st.button("CLEAR ALL"):
-        st.session_state.clear()
-        st.rerun()
+# Clipboard Input
+input_text = st.text_area("TARGET INPUT", height=150, placeholder="Eingabe hier...")
+clipboard_js = """<script>async function p(){const t=await navigator.clipboard.readText();const a=window.parent.document.querySelector('textarea');if(a){a.value=t;a.dispatchEvent(new Event('input',{{bubbles:true}}));}}</script><button onclick="p()" style="background:rgba(0,212,255,0.1); color:#00d4ff; border:1px solid #00d4ff; padding:10px; border-radius:12px; cursor:pointer; width:100%; font-family:'Orbitron';">📋 SYNC CLIPBOARD</button>"""
+st.components.v1.html(clipboard_js, height=60)
 
 if st.button("⚡ EXECUTE PROCESS"):
     if input_text:
-        start_time = time.time()
         eintraege = [s.strip() for s in input_text.split('\n') if s.strip()]
         res_dict = defaultdict(list)
+        errors = []
         
         with st.status("INITIALIZING SYSTEM...", expanded=True) as status:
             for entry in eintraege:
@@ -138,7 +95,6 @@ if st.button("⚡ EXECUTE PROCESS"):
                     gdf = ox.features_from_address(q, tags={"highway": True}, dist=800)
                     
                     if not gdf.empty:
-                        # Find Suburb/Ortsteil
                         location = "Landkreis"
                         for col in ['addr:suburb', 'addr:city', 'municipality']:
                             if col in gdf.columns and gdf[col].dropna().any():
@@ -153,18 +109,25 @@ if st.button("⚡ EXECUTE PROCESS"):
                             p_gdf = ox.geocode_to_gdf(q)
                             if not p_gdf.empty:
                                 lat, lon = p_gdf.iloc[0].geometry.centroid.y, p_gdf.iloc[0].geometry.centroid.x
-                                folium.Marker([lat, lon], icon=folium.Icon(color='blue', icon='flag', prefix='fa')).add_to(m)
+                                folium.Marker([lat, lon], icon=folium.Icon(color='blue', icon='flag')).add_to(m)
                                 m.location = [lat, lon]
 
                         res_dict[location].append((entry, m._repr_html_()))
-                except Exception as e:
+                    else:
+                        errors.append(entry)
+                except: 
+                    errors.append(entry)
                     continue
             
-            total_time = round(time.time() - start_time, 2)
-            status.update(label=f"PROCESS COMPLETE IN {total_time}S", state="complete")
-
+            if res_dict:
+                status.update(label="PROCESS COMPLETE", state="complete")
+                play_audio("success")
+            if errors:
+                status.update(label=f"WARNING: {len(errors)} FAILED", state="error")
+                play_audio("fail")
+        
+        # Ergebnisanzeige
         if res_dict:
-            st.toast(f"Mapping von {len(eintraege)} Zielen abgeschlossen!", icon="🚀")
             for area, maps in res_dict.items():
                 st.markdown(f'<div class="ort-container"><h3>📡 AREA: {area}</h3>', unsafe_allow_html=True)
                 grid = st.columns(2)
@@ -172,10 +135,9 @@ if st.button("⚡ EXECUTE PROCESS"):
                     with grid[idx % 2]:
                         st.markdown(f"**Target:** `{name}`")
                         b64 = base64.b64encode(html.encode()).decode()
-                        st.markdown(f'<a href="data:text/html;base64,{b64}" target="_blank"><button style="width:100%; background:rgba(0,212,255,0.2); color:#00d4ff; border:1px solid #00d4ff; padding:5px; border-radius:8px; cursor:pointer; font-size:12px;">VIEW FULLSCREEN</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="data:text/html;base64,{b64}" target="_blank"><button style="width:100%; background:rgba(0,212,255,0.2); color:#00d4ff; border:1px solid #00d4ff; padding:5px; border-radius:8px; cursor:pointer;">VIEW FULLSCREEN</button></a>', unsafe_allow_html=True)
                         st.components.v1.html(html, height=400)
                 st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.warning("SYSTEM IDLE: NO INPUT DETECTED")
-
-st.markdown("<br><hr><center style='color:rgba(255,255,255,0.3);'>MM3000 // SERIES GOLD // 2026</center>", unsafe_allow_html=True)
+        
+        if errors:
+            st.error(f"Folgende Einträge wurden nicht im Cache oder Online gefunden: {', '.join(errors)}")
