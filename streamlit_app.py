@@ -4,12 +4,11 @@ import folium
 import io, zipfile, os, re
 import pandas as pd
 from collections import defaultdict
-from datetime import datetime
 
-# --- 1. SETUP ---
+# --- 1. SETUP & PERFORMANCE CACHE ---
 st.set_page_config(page_title="Mapmarker Pro", layout="wide")
 
-# Cache einrichten
+# Cache für OSMNX Daten für schnellere Ladezeiten
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -23,7 +22,7 @@ def verarbeite_strasse(strasse):
     query = f"{strasse_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        # Daten laden
+        # Daten laden (nutzt Cache)
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=2000)
         
         if not gdf.empty:
@@ -80,7 +79,6 @@ if uploaded_file:
                     # 🔵 SCHNICKSCHNACK MIT SINN: Fähnchen bei Hausnummer
                     if any(c.isdigit() for c in item["original"]):
                         try:
-                            # Geocode mit Ortsteil für höhere Präzision
                             p_gdf = ox.geocode_to_gdf(f"{item['original']}, {ort}, Landkreis Marburg-Biedenkopf, Germany")
                             if not p_gdf.empty:
                                 loc = p_gdf.iloc[0].geometry.centroid
@@ -93,13 +91,14 @@ if uploaded_file:
                     bounds = combined.total_bounds
                     m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
                 
-                st.components.v1.html(m._repr_html_(), height=400)
-                zip_file.writestr(f"{ort}.html", m._repr_html_())
+                # HTML Karte in ZIP
+                map_html = m._repr_html_()
+                st.components.v1.html(map_html, height=400)
+                zip_file.writestr(f"{ort}.html", map_html)
         
-        # 🔵 SCHNICKSCHNACK MIT SINN: Download Button
+        # 🔵 SCHNICKSCHNACK MIT SINN: Download Buttons
         st.download_button("Download ZIP", zip_buffer.getvalue(), "karten.zip", "application/zip")
         
-        # 🔵 SCHNICKSCHNACK MIT SINN: Fehler-Export
         if errors:
             st.error(f"{len(errors)} Straßen nicht gefunden.")
             error_text = "\n".join(errors)
