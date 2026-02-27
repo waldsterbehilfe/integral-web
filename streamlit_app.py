@@ -1,6 +1,7 @@
 import streamlit as st
 import osmnx as ox
 import folium
+from streamlit_folium import st_folium
 from collections import defaultdict
 import io
 import zipfile
@@ -8,119 +9,104 @@ import base64
 import os
 from datetime import datetime
 
-# --- 1. KONFIGURATION & SPEICHER (Caching) ---
-ox.settings.use_cache = True
-ox.settings.cache_folder = "./geocache"
+# --- DESIGN & BG ---
+def set_bg():
+    if os.path.exists('hintergrund.png'):
+        with open('hintergrund.png', 'rb') as f:
+            data = base64.b64encode(f.read()).decode()
+        st.markdown(f"""
+            <style>
+            .stApp {{
+                background-image: url("data:image/png;base64,{data}");
+                background-size: cover;
+                background-attachment: fixed;
+            }}
+            .block-container {{
+                background: rgba(30, 30, 30, 0.9);
+                padding: 2rem; border-radius: 15px; color: white;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            }}
+            .stButton>button {{
+                background: linear-gradient(to right, #1976d2, #004a99);
+                color: white; font-weight: bold; width: 100%; border-radius: 8px; height: 3em;
+            }}
+            .map-container {{
+                margin-bottom: 40px;
+                border: 2px solid #1976d2;
+                border-radius: 10px;
+                overflow: hidden;
+            }}
+            </style>
+        """, unsafe_allow_html=True)
 
-# --- 2. DESIGN-LOGIK (Hintergrund & Modi) ---
-def get_base64(bin_file):
-    if os.path.exists(bin_file):
-        with open(bin_file, 'rb') as f:
-            return base64.b64encode(f.read()).decode()
-    return None
+st.set_page_config(page_title="INTEGRAL Gold v4.5", layout="wide") # 'wide' für bessere Kartenansicht
+set_bg()
 
-def apply_design(dark_mode=True):
-    bg_img = get_base64('hintergrund.png')
-    bg_style = ""
-    if bg_img:
-        bg_style = f'background-image: url("data:image/png;base64,{bg_img}"); background-size: cover; background-attachment: fixed;'
+st.title("🗺️ INTEGRAL Web Gold")
+st.markdown("Präzisions-Modus mit **Direkt-Vorschau**")
 
-    main_bg = "#1e1e1e" if dark_mode else "#f5f7f9"
-    text_color = "#ffffff" if dark_mode else "#2c3e50"
-    box_bg = "rgba(30, 30, 30, 0.85)" if dark_mode else "rgba(255, 255, 255, 0.9)"
+# Eingabe
+input_text = st.text_area("Straßenliste:", height=150, placeholder="Hauptstraße\nSchloßweg...")
 
-    st.markdown(f"""
-        <style>
-        .stApp {{ {bg_style} }}
-        .block-container {{
-            background: {box_bg};
-            padding: 2rem;
-            border-radius: 15px;
-            color: {text_color};
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            margin-top: 20px;
-        }}
-        .stButton>button {{
-            background: linear-gradient(to right, #1976d2, #004a99);
-            color: white; border: none; font-weight: bold; width: 100%; border-radius: 8px; height: 3.5em;
-        }}
-        footer {{visibility: hidden;}}
-        .footer-text {{ text-align: right; font-size: 12px; color: gray; }}
-        </style>
-    """, unsafe_allow_html=True)
-
-# --- 3. UI-STRUKTUR ---
-st.set_page_config(page_title="INTEGRAL WEB v4.0", layout="centered")
-
-# Sidebar für die "Ewig-Einstellungen"
-st.sidebar.title("⚙️ Optionen")
-mode = st.sidebar.radio("Design-Modus", ["Dark Mode", "Light Mode"])
-apply_design(dark_mode=(mode == "Dark Mode"))
-
-st.sidebar.divider()
-st.sidebar.info("Modus: Landkreis Marburg-Biedenkopf")
-
-# Speicher-Funktion: Letzte 5 Karten (Session State)
-if 'history' not in st.session_state:
-    st.session_state.history = []
-
-st.title("🗺️ INTEGRAL Web")
-st.subheader("Der Goldstandard als Web-App")
-
-# Eingabefeld (Eins-zu-Eins wie Tkinter)
-input_text = st.text_area("Straßenliste hier einfügen:", height=250, placeholder="Am Markt\nSchlossstraße...")
-
-if st.button("KARTEN GENERIEREN"):
-    strassen = [s.strip() for s in input_text.split('\n') if s.strip()]
+if st.button("KARTEN GENERIEREN & ANZEIGEN"):
+    strassen_liste = [s.strip() for s in input_text.split('\n') if s.strip()]
     
-    if strassen:
-        with st.status("🚀 Prozess gestartet...", expanded=True) as status:
+    if strassen_liste:
+        with st.status("Verarbeite und filtere Daten...", expanded=True) as status:
             ort_sammlung = defaultdict(list)
-            bar = st.progress(0)
             
-            for i, strasse in enumerate(strassen):
+            for s_name in strassen_liste:
                 try:
-                    query = f"{strasse}, Landkreis Marburg-Biedenkopf, Germany"
-                    gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
+                    q = f"{s_name}, Landkreis Marburg-Biedenkopf, Germany"
+                    gdf = ox.features_from_address(q, tags={"highway": True}, dist=800)
                     
                     if not gdf.empty:
-                        # Ort finden
-                        stadt = "Unbekannt"
-                        for col in ['addr:suburb', 'addr:city', 'municipality', 'city']:
-                            if col in gdf.columns and gdf[col].dropna().any():
-                                stadt = gdf[col].dropna().iloc[0]
-                                break
-                        
-                        geo_json = folium.GeoJson(gdf, style_function=lambda x: {'color':'red','weight':6})
-                        ort_sammlung[stadt].append(geo_json)
-                except: continue
-                bar.progress((i + 1) / len(strassen))
+                        # Präzisions-Filter
+                        if 'name' in gdf.columns:
+                            target_gdf = gdf[gdf['name'].str.contains(s_name, case=False, na=False)]
+                        else:
+                            target_gdf = gdf
 
+                        if not target_gdf.empty:
+                            stadt = "Unbekannt"
+                            for col in ['addr:suburb', 'addr:city', 'municipality', 'city']:
+                                if col in target_gdf.columns and target_gdf[col].dropna().any():
+                                    stadt = target_gdf[col].dropna().iloc[0]
+                                    break
+                            
+                            geo = folium.GeoJson(target_gdf, style_function=lambda x: {'color':'red','weight':8, 'opacity': 0.9})
+                            ort_sammlung[stadt].append(geo)
+                except:
+                    continue
+            
             if ort_sammlung:
-                # Speicher für Historie aktualisieren
-                st.session_state.history.append(f"{datetime.now().strftime('%H:%M')} - {len(ort_sammlung)} Orte")
-                if len(st.session_state.history) > 5: st.session_state.history.pop(0)
-
-                status.update(label="✅ Karten fertig berechnet!", state="complete")
-                st.balloons()
+                status.update(label="✅ Karten bereit!", state="complete")
                 
-                # ZIP-Download
+                # 1. ZIP-BUFFER für den Download-Button (bleibt bestehen)
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w") as zf:
+                    st.write("### 👁️ Direkt-Vorschau der Ergebnisse:")
+                    
                     for ort, elemente in ort_sammlung.items():
-                        m = folium.Map(location=[50.81, 8.77], zoom_start=13)
-                        for el in elemente: el.add_to(m)
+                        # Karte erstellen
+                        m = folium.Map(location=[50.81, 8.77], zoom_start=14)
+                        for e in elemente:
+                            e.add_to(m)
+                        
+                        # In ZIP speichern
                         zf.writestr(f"Karte_{ort}.html", m._repr_html_())
-                
-                st.download_button("📥 KARTEN-PAKET (ZIP) HERUNTERLADEN", zip_buffer.getvalue(), 
-                                   file_name=f"INTEGRAL_{datetime.now().strftime('%H%M')}.zip")
+                        
+                        # LIVE IM BROWSER ANZEIGEN
+                        st.write(f"**📍 Ortsteil/Stadt: {ort}**")
+                        st_folium(m, width=700, height=400, key=f"map_{ort}")
+                        st.divider()
+
+                # 2. DOWNLOAD BUTTON (immer am Ende)
+                st.download_button(
+                    label="📥 ALLES ALS ZIP HERUNTERLADEN",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"INTEGRAL_Export_{datetime.now().strftime('%H%M')}.zip",
+                    mime="application/zip"
+                )
             else:
-                status.update(label="❌ Nichts gefunden.", state="error")
-
-# Letzte 5 Karten im Menü anzeigen
-st.sidebar.divider()
-st.sidebar.write("📜 Letzte Durchläufe:")
-for h in reversed(st.session_state.history):
-    st.sidebar.caption(h)
-
-st.markdown("<div class='footer-text'>© Maus | Gold Edition v4.0</div>", unsafe_allow_html=True)
+                status.update(label="❌ Keine passenden Straßennamen gefunden.", state="error")
