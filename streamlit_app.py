@@ -77,17 +77,19 @@ def apply_titan_style(dark, bg_active):
         .stApp {{ {bg_css} background-size: cover; background-attachment: fixed; }}
         .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 80px !important; }}
         
+        /* BRANDING FIX */
         .copyright-branding {{
-            position: absolute;
-            bottom: 30px;
-            right: 40px;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
             font-family: 'Orbitron', sans-serif;
-            font-size: 1rem;
+            font-size: 0.9rem;
             color: {akzent};
             text-decoration: none;
             transition: all 0.3s ease;
             text-shadow: 0 0 10px rgba(0,212,255,0.5);
             letter-spacing: 2px;
+            z-index: 1000;
         }}
         .copyright-branding:hover {{ color: #ffffff; text-shadow: 0 0 15px #ffffff; }}
         
@@ -108,7 +110,7 @@ def apply_titan_style(dark, bg_active):
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V15.0", layout="wide")
+st.set_page_config(page_title="TITAN V15.1", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
 bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
@@ -130,7 +132,7 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 15.0 // Usability Edition")
+st.caption("Version 15.1 // Fix & Stability")
 
 input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
@@ -175,11 +177,14 @@ if start_btn:
                 gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
                 
                 if not gdf.empty:
-                    ortsteil = "Landkreis"
-                    for key in ['addr:suburb', 'suburb', 'addr:city', 'municipality']:
-                        if key in gdf.columns and gdf[key].dropna().any():
-                            ortsteil = gdf[key].dropna().iloc[0]
-                            break
+                    # Bessere Ermittlung des Ortsteils
+                    ortsteil = "Unbekannt"
+                    for key in ['addr:suburb', 'suburb', 'addr:city', 'municipality', 'county']:
+                        if key in gdf.columns:
+                            val = gdf[key].dropna().unique()
+                            if len(val) > 0:
+                                ortsteil = val[0]
+                                break
                     
                     str_clean = re.sub(r'\s+\d+.*', '', eintrag)
                     target = gdf[gdf['name'].str.contains(str_clean, case=False, na=False)] if 'name' in gdf.columns else gdf
@@ -202,11 +207,11 @@ if start_btn:
             for ortsteil, items in results_by_district.items():
                 st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
                 
+                # --- MAP INITIALISIERUNG ---
                 m = folium.Map(tiles='cartodbdark_matter' if ist_dunkel else 'cartodbpositron')
                 alle_geoms = []
                 
                 for item in items:
-                    # --- MOUSE-OVER FÜR STRASSENNAME ---
                     folium.GeoJson(
                         item["gdf"],
                         style_function=lambda x: {'color':'#ff0055','weight':8},
@@ -221,11 +226,12 @@ if start_btn:
                             loc = p_gdf.iloc[0].geometry.centroid
                             folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='flag')).add_to(m)
                 
-                # --- ZOOM: KORRIGIERT AUF BESTE ÜBERSICHT ---
+                # --- ZOOM: VERBESSERTE LOGIK ---
                 if alle_geoms:
                     combined_gdf = pd.concat(alle_geoms)
-                    # Erhöhter Padding-Wert für mehr Umgebung
-                    m.fit_bounds(combined_gdf.total_bounds[[1, 0, 3, 2]].tolist(), padding=(0.05, 0.05))
+                    # bounds in [miny, minx, maxy, maxx] konvertieren
+                    bounds = combined_gdf.total_bounds
+                    m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 
                 html_map = m._repr_html_()
                 
