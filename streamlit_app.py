@@ -2,6 +2,7 @@ import streamlit as st
 import osmnx as ox
 import folium
 import io, zipfile, base64, os, re, time
+import pandas as pd
 from collections import defaultdict
 
 # --- 1. ENGINE & ROBUSTER CACHE ---
@@ -42,21 +43,14 @@ def bereinige_adresse(text):
     t = re.sub(r'\s+', ' ', t)
     return t
 
-# --- 3. MULTIMEDIA & DYNAMIC UI ---
-def spiele_audio(typ="erfolg"):
-    sounds = {
-        "erfolg": "https://codeskulptor-demos.commondatastorage.googleapis.com/descent/gotitem.mp3",
-        "fehler": "https://www.myinstants.com/media/sounds/nelson-haha.mp3"
-    }
-    st.components.v1.html(f'<audio autoplay><source src="{sounds[typ]}" type="audio/mpeg"></audio>', height=0)
-
+# --- 3. UI HELPER ---
 def erzeuge_link(html_code, ortsteil):
     b64 = base64.b64encode(html_code.encode()).decode()
     return f'''<a href="data:text/html;base64,{b64}" target="_blank" style="text-decoration:none;">
                 <div style="background: linear-gradient(135deg, #00d4ff 0%, #0055ff 100%); 
-                color: white; padding: 15px; border-radius: 15px; text-align: center; 
-                font-weight: bold; font-family: 'Orbitron'; margin-top: 10px;
-                box-shadow: 0 5px 20px rgba(0, 212, 255, 0.5);">
+                color: white; padding: 10px; border-radius: 10px; text-align: center; 
+                font-weight: bold; font-family: 'Orbitron'; font-size: 0.9rem; margin-top: 10px;
+                box-shadow: 0 3px 10px rgba(0, 212, 255, 0.4);">
                 🖥️ VOLLBILD: {ortsteil.upper()}
                 </div></a>'''
 
@@ -71,7 +65,7 @@ def apply_titan_style(dark, bg_active):
     danger = "#ff4b4b"
     panel_bg = "rgba(10, 10, 15, 0.85)" if dark else "rgba(240, 242, 246, 0.9)"
     text_col = "#ffffff" if dark else "#2c3e50"
-    sub_bg = "rgba(0, 212, 255, 0.05)" if dark else "rgba(0, 85, 255, 0.05)"
+    sub_bg = "rgba(0, 212, 255, 0.03)" if dark else "rgba(0, 85, 255, 0.03)"
 
     # --- KONFIGURATION FÜR MAIL ---
     EMAIL_ADRESSE = "deine.email@beispiel.de" # <-- HIER ANPASSEN
@@ -81,17 +75,16 @@ def apply_titan_style(dark, bg_active):
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@500;700&display=swap');
         .stApp {{ {bg_css} background-size: cover; background-attachment: fixed; }}
-        .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 60px !important; }}
+        .block-container {{ background: {panel_bg}; backdrop-filter: blur(20px); border-radius: 40px; padding: 3rem !important; color: {text_col}; position: relative; padding-bottom: 80px !important; }}
         
-        /* KLICKBARES BRANDING UNTEN RECHTS */
         .copyright-branding {{
             position: absolute;
             bottom: 20px;
             right: 30px;
             font-family: 'Rajdhani', sans-serif;
-            font-size: 0.9rem;
-            color: rgba(255, 255, 255, 0.5);
-            letter-spacing: 2px;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.4);
+            letter-spacing: 1px;
             text-decoration: none;
             transition: color 0.3s ease;
         }}
@@ -99,20 +92,23 @@ def apply_titan_style(dark, bg_active):
         .copyright-branding b {{ color: {akzent}; }}
         
         @keyframes rotate-vortex {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
-        .vortex-loader {{ width: 50px; height: 50px; border: 3px solid transparent; border-top: 3px solid {akzent}; border-radius: 50%; display: inline-block; animation: rotate-vortex 1s linear infinite; margin-right: 20px; vertical-align: middle; box-shadow: 0 0 15px {akzent}; }}
-        .status-container {{ background: rgba(0, 212, 255, 0.1); padding: 25px; border-radius: 25px; border: 1px solid {akzent}; margin-bottom: 30px; }}
+        .vortex-loader {{ width: 40px; height: 40px; border: 3px solid transparent; border-top: 3px solid {akzent}; border-radius: 50%; display: inline-block; animation: rotate-vortex 1s linear infinite; margin-right: 15px; vertical-align: middle; box-shadow: 0 0 10px {akzent}; }}
+        .status-container {{ background: rgba(0, 212, 255, 0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(0, 212, 255, 0.3); margin-bottom: 20px; }}
         
-        .ort-box-titan {{ background: {sub_bg}; border-radius: 30px; padding: 40px; margin-bottom: 50px; border: 1px solid rgba(0, 212, 255, 0.2); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }}
-        .titan-header {{ font-family: 'Orbitron'; color: {akzent}; font-size: 2.2rem; margin-bottom: 30px; text-shadow: 0 0 10px rgba(0,212,255,0.5); }}
-        .stButton button {{ width: 100%; height: 4rem; border-radius: 20px; background: linear-gradient(90deg, #0055ff, #00d4ff) !important; font-family: 'Orbitron'; font-size: 1.2rem; border: none; }}
+        .ort-box-titan {{ background: {sub_bg}; border-radius: 25px; padding: 30px; margin-bottom: 40px; border: 1px solid rgba(0, 212, 255, 0.1); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }}
+        .titan-header {{ font-family: 'Orbitron'; color: {akzent}; font-size: 1.6rem; margin-bottom: 20px; text-shadow: 0 0 5px rgba(0,212,255,0.3); }}
+        
+        .stButton button {{ width: 100%; height: 3.5rem; border-radius: 15px; background: linear-gradient(90deg, #0055ff, #00d4ff) !important; font-family: 'Orbitron'; font-size: 1rem; border: none; }}
         div.stButton > button[kind="primary"] {{ background: linear-gradient(90deg, #550000, {danger}) !important; }}
         
+        /* KLENE FEEDBACK BUTTONS UNTEN */
+        .feedback-area {{ display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; opacity: 0.6; font-size: 0.8rem; }}
         </style>
         <a href="{MAIL_LINK}" class="copyright-branding">Powered by <b>[DEIN NAME/FIRMA]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
-st.set_page_config(page_title="TITAN V12.4", layout="wide")
+st.set_page_config(page_title="TITAN V13.1", layout="wide")
 ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
 bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
 apply_titan_style(ist_dunkel, bg_an)
@@ -134,9 +130,9 @@ if cache_neu > 0:
 st.sidebar.metric("GESAMT-DATENBANK", f"{cache_total} Objekte")
 
 st.title("MAPMARKER 3000 — TITAN")
-st.caption("Version 12.4 // Contact Edition")
+st.caption("Version 13.1 // Ortsteil-Aggregator")
 
-input_text = st.text_area("ZIEL-EINGABE:", height=180, placeholder="Straßenliste...")
+input_text = st.text_area("ZIEL-EINGABE:", height=150, placeholder="Bahnhofstr. 5\nAm Markt...")
 
 col1, col2 = st.columns([4, 1])
 with col1:
@@ -149,7 +145,9 @@ if start_btn:
     if input_text:
         rohe_eintraege = [s.strip() for s in input_text.split('\n') if s.strip()]
         gesamt = len(rohe_eintraege)
-        ergebnisse = defaultdict(list)
+        
+        # --- DATEN ZWISCHENSPEICHERN ---
+        results_by_district = defaultdict(list)
         fehler = []
         
         status_box = st.empty()
@@ -166,7 +164,7 @@ if start_btn:
             status_box.markdown(f"""
                 <div class="status-container">
                     <div class="vortex-loader"></div>
-                    <span style="font-family:'Orbitron'; color:#00d4ff; font-size:1.2rem;">
+                    <span style="font-family:'Orbitron'; color:#00d4ff; font-size:1rem;">
                         ANALYSE: {aktuelle_nr} / {gesamt} — <b>{eintrag}</b>
                     </span>
                 </div>
@@ -175,7 +173,7 @@ if start_btn:
             
             try:
                 q = f"{eintrag}, Landkreis Marburg-Biedenkopf, Germany"
-                gdf = ox.features_from_address(q, tags={"highway": True}, dist=1000)
+                gdf = ox.features_from_address(q, tags={"highway": True}, dist=2000)
                 
                 if not gdf.empty:
                     ortsteil = "Landkreis"
@@ -187,7 +185,8 @@ if start_btn:
                     str_clean = re.sub(r'\s+\d+.*', '', eintrag)
                     target = gdf[gdf['name'].str.contains(str_clean, case=False, na=False)] if 'name' in gdf.columns else gdf
                     
-                    ergebnisse[ortsteil].append({
+                    # --- DATEN NACH ORTSTEIL GRUPPIEREN ---
+                    results_by_district[ortsteil].append({
                         "name": eintrag,
                         "gdf": target,
                         "query": q
@@ -201,35 +200,45 @@ if start_btn:
         prog_bar.empty()
 
         # Ergebnisse anzeigen
-        if ergebnisse:
-            spiele_audio("erfolg")
-            for ortsteil in sorted(ergebnisse.keys()):
-                st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 SEKTOR: {ortsteil}</h2>', unsafe_allow_html=True)
+        if results_by_district:
+            # --- FENSTER PRO ORTSTEIL ---
+            for ortsteil, items in results_by_district.items():
+                st.markdown(f'<div class="ort-box-titan"><h2 class="titan-header">📍 {ortsteil}</h2>', unsafe_allow_html=True)
                 
                 m = folium.Map(tiles='cartodbdark_matter' if ist_dunkel else 'cartodbpositron')
                 alle_geoms = []
                 
-                for item in ergebnisse[ortsteil]:
+                for item in items:
+                    # Straßen des Ortsteils zeichnen
                     folium.GeoJson(item["gdf"], style_function=lambda x: {'color':'#ff0055','weight':8}).add_to(m)
                     alle_geoms.append(item["gdf"])
                     
+                    # Marker für Hausnummern
                     if any(c.isdigit() for c in item["name"]):
                         p_gdf = ox.geocode_to_gdf(item["query"])
                         if not p_gdf.empty:
                             loc = p_gdf.iloc[0].geometry.centroid
                             folium.Marker([loc.y, loc.x], icon=folium.Icon(color='blue', icon='flag')).add_to(m)
                 
+                # --- ZOOM: KORRIGIERT AUF ALLE STRASSEN DES ORTSTEILS ---
                 if alle_geoms:
-                    import pandas as pd
                     combined_gdf = pd.concat(alle_geoms)
                     m.fit_bounds(combined_gdf.total_bounds[[1, 0, 3, 2]].tolist())
                 
                 html_map = m._repr_html_()
-                st.markdown(erzeuge_link(html_map, ortsteil), unsafe_allow_html=True)
-                st.components.v1.html(html_map, height=600)
                 
-                st.markdown('</div>', unsafe_allow_html=True)
+                # --- VOLLBILD LINK FÜR DEN ORTSTEIL ---
+                st.markdown(erzeuge_link(html_map, ortsteil), unsafe_allow_html=True)
+                st.components.v1.html(html_map, height=500)
+                
+                # --- FEEDBACK UNTEN ---
+                st.markdown('<div class="feedback-area">', unsafe_allow_html=True)
+                col_c1, col_c2 = st.columns([1, 10])
+                with col_c1:
+                    st.button("👍", key=f"like_{ortsteil}_{time.time()}")
+                with col_c2:
+                    st.button("👎", key=f"dislike_{ortsteil}_{time.time()}")
+                st.markdown('</div></div>', unsafe_allow_html=True)
         
         if fehler:
-            spiele_audio("fehler")
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
