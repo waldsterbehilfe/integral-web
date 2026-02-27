@@ -106,13 +106,13 @@ def apply_titan_style(dark, bg_active):
         /* SIDEBAR FEEDBACK */
         .feedback-sidebar-btn {{ font-size: 0.5rem !important; height: 1.5rem !important; opacity: 0.5; }}
         </style>
-        <a href="{MAIL_LINK}" class="copyright-branding"><b>[Peter MAUS]</b> © 2026</a>
+        <a href="{MAIL_LINK}" class="copyright-branding"><b>Peter MAUS</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
 st.set_page_config(page_title="TITAN V15.2", layout="wide")
-ist_dunkel = st.sidebar.toggle("Cyber-Modus (Dunkel)", True)
-bg_an = st.sidebar.toggle("Hintergrund-Sättigung", True)
+ist_dunkel = st.sidebar.toggle("Dunkel", True)
+bg_an = st.sidebar.toggle("Hintergrundbild", True)
 apply_titan_style(ist_dunkel, bg_an)
 
 # --- SIDEBAR FEEDBACK (Ganz unten & klein) ---
@@ -244,4 +244,5 @@ if start_btn:
         
         if fehler:
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
+
 
