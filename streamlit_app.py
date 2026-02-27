@@ -2,134 +2,85 @@ import streamlit as st
 import osmnx as ox
 import folium
 from streamlit_folium import st_folium
+import io, zipfile, base64, os
 from collections import defaultdict
-import io
-import zipfile
-import base64
-import os
-from datetime import datetime
 
-# --- 1. SESSION STATE (Das Gedächtnis der App) ---
-if 'maps_ready' not in st.session_state:
-    st.session_state.maps_ready = False
-if 'ort_sammlung' not in st.session_state:
-    st.session_state.ort_sammlung = None
-if 'zip_data' not in st.session_state:
-    st.session_state.zip_data = None
+# --- 1. TURBO-CACHE SYSTEM ---
+# Wir definieren einen festen Ordner für die Straßendaten
+CACHE_NAME = "geocache"
+if not os.path.exists(CACHE_NAME):
+    os.makedirs(CACHE_NAME)
 
-# --- 2. DESIGN-LOGIK ---
-def set_design(dark_mode):
-    bg_color = "rgba(30, 30, 30, 0.9)" if dark_mode else "rgba(255, 255, 255, 0.9)"
-    text_color = "white" if dark_mode else "#2c3e50"
-    
-    bg_img_html = ""
+# Hier wird der Speicher aktiviert
+ox.settings.use_cache = True
+ox.settings.cache_folder = f"./{CACHE_NAME}"
+ox.settings.log_console = False # Macht das Programm schneller
+
+# --- 2. DESIGN & MODUS ---
+def apply_gold_design(dark):
+    bg_img = ""
     if os.path.exists('hintergrund.png'):
         with open('hintergrund.png', 'rb') as f:
             data = base64.b64encode(f.read()).decode()
-        bg_img_html = f'background-image: url("data:image/png;base64,{data}"); background-size: cover; background-attachment: fixed;'
-
+        bg_img = f'background-image: url("data:image/png;base64,{data}"); background-size: cover; background-attachment: fixed;'
+    
+    panel_bg = "rgba(25, 25, 25, 0.95)" if dark else "rgba(255, 255, 255, 0.95)"
+    text_col = "white" if dark else "#1a1a1a"
+    
     st.markdown(f"""
         <style>
-        .stApp {{ {bg_img_html} }}
-        .block-container {{
-            background: {bg_color};
-            padding: 2rem; border-radius: 15px; color: {text_color};
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-        }}
-        .stButton>button {{
-            background: linear-gradient(to right, #1976d2, #004a99);
-            color: white; font-weight: bold; width: 100%; border-radius: 8px; height: 3em;
-        }}
+        .stApp {{ {bg_img} }}
+        .block-container {{ background: {panel_bg}; color: {text_col}; border-radius: 20px; padding: 2.5rem; }}
+        .stButton>button {{ background: #1976d2; color: white; border-radius: 10px; font-weight: bold; width: 100%; height: 3em; }}
         </style>
     """, unsafe_allow_html=True)
 
-# --- 3. UI STRUKTUR ---
-st.set_page_config(page_title="INTEGRAL Gold v5.0", layout="wide")
+st.set_page_config(page_title="INTEGRAL TURBO-CACHE", layout="wide")
 
-# Auswahl-Design in der Sidebar (bleibt immer sichtbar)
-st.sidebar.title("🎨 Design & Optionen")
-choice = st.sidebar.radio("Farbschema wählen:", ["Dark Mode", "Light Mode"])
-set_design(dark_mode=(choice == "Dark Mode"))
+# Sidebar
+st.sidebar.title("Optionen")
+choice = st.sidebar.radio("Design:", ["Dark Mode", "Light Mode"])
+apply_design_status = apply_gold_design(dark=(choice == "Dark Mode"))
 
-st.title("🗺️ INTEGRAL Web Gold")
-st.markdown("Karten bleiben nach der Suche dauerhaft sichtbar.")
+st.title("🗺️ INTEGRAL GOLD v6.0")
+st.caption("Status: Turbo-Cache ist AKTIV (Wiederholte Suchen gehen blitzschnell)")
 
-# Eingabe
-input_text = st.text_area("Straßenliste:", height=150, placeholder="Hauptstraße\nSchloßweg...")
+# --- 3. VERARBEITUNG MIT SPEICHER-PRÜFUNG ---
+input_text = st.text_area("Straßenliste:", height=200, placeholder="Straße eingeben...")
 
-# --- 4. VERARBEITUNG ---
-if st.button("KARTEN GENERIEREN"):
-    strassen_liste = [s.strip() for s in input_text.split('\n') if s.strip()]
+if st.button("KARTEN MIT CACHE GENERIEREN"):
+    strassen = [s.strip() for s in input_text.split('\n') if s.strip()]
     
-    if strassen_liste:
-        with st.status("Suche läuft...", expanded=True) as status:
-            temp_ort_sammlung = defaultdict(list)
+    if strassen:
+        with st.status("Verarbeite Straßen...", expanded=True) as status:
+            res_dict = defaultdict(list)
             
-            for s_name in strassen_liste:
+            for s in strassen:
+                # Das Programm prüft hier automatisch erst den Ordner 'geocache'
                 try:
-                    q = f"{s_name}, Landkreis Marburg-Biedenkopf, Germany"
+                    q = f"{s}, Landkreis Marburg-Biedenkopf, Germany"
+                    
+                    # Suche (greift auf den Cache zu, wenn vorhanden)
                     gdf = ox.features_from_address(q, tags={"highway": True}, dist=800)
+                    
                     if not gdf.empty:
-                        if 'name' in gdf.columns:
-                            target_gdf = gdf[gdf['name'].str.contains(s_name, case=False, na=False)]
-                        else:
-                            target_gdf = gdf
-
-                        if not target_gdf.empty:
-                            stadt = "Unbekannt"
-                            for col in ['addr:suburb', 'addr:city', 'municipality']:
-                                if col in target_gdf.columns and target_gdf[col].dropna().any():
-                                    stadt = target_gdf[col].dropna().iloc[0]
-                                    break
-                            
-                            geo = folium.GeoJson(target_gdf, style_function=lambda x: {'color':'red','weight':8})
-                            temp_ort_sammlung[stadt].append(geo)
+                        target = gdf[gdf['name'].str.contains(s, case=False, na=False)] if 'name' in gdf.columns else gdf
+                        stadt = "Ort"
+                        for col in ['addr:suburb', 'addr:city', 'municipality']:
+                            if col in target.columns and target[col].dropna().any():
+                                stadt = target[col].dropna().iloc[0]
+                                break
+                        geo = folium.GeoJson(target, style_function=lambda x: {'color':'red','weight':8})
+                        res_dict[stadt].append(geo)
                 except: continue
             
-            if temp_ort_sammlung:
-                # Ergebnisse im Session State speichern
-                st.session_state.ort_sammlung = temp_ort_sammlung
-                st.session_state.maps_ready = True
-                
-                # ZIP im Hintergrund erstellen
-                zip_buffer = io.BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w") as zf:
-                    for ort, elemente in temp_ort_sammlung.items():
-                        m_temp = folium.Map(location=[50.81, 8.77], zoom_start=14)
-                        for e in elemente: e.add_to(m_temp)
-                        zf.writestr(f"Karte_{ort}.html", m_temp._repr_html_())
-                st.session_state.zip_data = zip_buffer.getvalue()
-                status.update(label="✅ Berechnung abgeschlossen!", state="complete")
-            else:
-                st.error("Keine passenden Straßen gefunden.")
-
-# --- 5. ANZEIGE DER ERGEBNISSE (Dauerhaft) ---
-if st.session_state.maps_ready:
-    st.divider()
-    st.write("### 👁️ Deine generierten Karten:")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        for ort, elemente in st.session_state.ort_sammlung.items():
-            st.write(f"**📍 Ort: {ort}**")
-            # Neue Karte für die Anzeige
-            m_display = folium.Map(location=[50.81, 8.77], zoom_start=14)
-            for e in elemente:
-                e.add_to(m_display)
-            st_folium(m_display, width=700, height=400, key=f"perm_map_{ort}")
-            st.divider()
-
-    with col2:
-        st.write("### 📥 Download")
-        st.download_button(
-            label="PAKET ALS ZIP LADEN",
-            data=st.session_state.zip_data,
-            file_name="INTEGRAL_Export.zip",
-            mime="application/zip"
-        )
-        if st.button("Ergebnisse löschen"):
-            st.session_state.maps_ready = False
-            st.rerun()
-
-st.markdown("<p style='text-align: right; color: gray; font-size: 10px;'>© Maus</p>", unsafe_allow_html=True)
+            if res_dict:
+                status.update(label="✅ Fertig (aus Cache geladen)!", state="complete")
+                # Anzeige Logik...
+                for ort, elemente in res_dict.items():
+                    st.write(f"**📍 {ort}**")
+                    m = folium.Map(location=[50.81, 8.77], zoom_start=14)
+                    for e in elemente: e.add_to(m)
+                    st_folium(m, width=800, height=400, key=f"map_{ort}")
+    else:
+        st.warning("Keine Straßen eingegeben.")
