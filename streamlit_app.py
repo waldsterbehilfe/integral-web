@@ -1,7 +1,7 @@
 import streamlit as st
 import osmnx as ox
 import folium
-import io, zipfile, base64, os, re
+import io, zipfile, os, re
 import pandas as pd
 from collections import defaultdict
 from datetime import datetime
@@ -27,7 +27,6 @@ def bereinige_adresse(text):
 
 def apply_custom_style(dark_mode):
     akzent = "#00d4ff"
-    danger = "#ff4b4b"
     st.markdown(f"""
         <style>
         .copyright-branding {{
@@ -55,7 +54,7 @@ st.sidebar.markdown("### 📊 Status")
 cache_files = sum([len(files) for r, d, files in os.walk(CACHE_DIR)])
 st.sidebar.metric("Cache Einträge", cache_files)
 
-st.title("🗺️ MAPMARKER 3000 — FORCED SEARCH")
+st.title("🗺️ MAPMARKER 3000 — V18.4")
 st.caption("Strikte Suche: Landkreis Marburg-Biedenkopf")
 
 uploaded_file = st.file_uploader("📥 Lade deine Straßenliste (.txt) hoch", type=["txt"])
@@ -75,31 +74,26 @@ if uploaded_file is not None:
         status_text = st.empty()
         progress_bar = st.progress(0)
         
-        # Geofencing: Bounding Box für den Landkreis (Marburg-Biedenkopf)
-        # Format: [north, south, east, west]
-        LK_BOUNDS = [51.05, 50.65, 9.15, 8.30] 
-        
         for i, strasse in enumerate(strassen):
             status_text.text(f"🔍 Suche: {strasse} ({i+1}/{total})")
             
             eintrag = bereinige_adresse(strasse)
             
-            # --- SUCHE MIT FORCED BBOX ---
+            # --- ROBUSTE SUCHE ---
             query = f"{eintrag}, Germany"
             
             try:
-                # Suche mit Bounding Box (Distanz reduziert, da BBox limitiert)
-                gdf = ox.features_from_place(query, tags={"highway": True})
-                
-                # Wenn features_from_place nicht reicht, nutze features_from_address mit fallback
-                if gdf.empty:
-                    gdf = ox.features_from_address(f"{eintrag}, Germany", tags={"highway": True}, dist=1000)
+                # Suche mit dist um BBox zu umgehen, falls features_from_place zu restriktiv ist
+                gdf = ox.features_from_address(query, tags={"highway": True}, dist=2000)
 
                 if not gdf.empty:
                     gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
                     
                     # Straßenname filtern
-                    gdf_f = gdf[gdf['name'].str.contains(eintrag, case=False, na=False)] if 'name' in gdf.columns else gdf
+                    if 'name' in gdf.columns:
+                        gdf_f = gdf[gdf['name'].str.contains(eintrag, case=False, na=False)]
+                    else:
+                        gdf_f = gdf
                     
                     if not gdf_f.empty:
                         # Ortserkennung
@@ -107,12 +101,12 @@ if uploaded_file is not None:
                         for col in ['addr:suburb', 'addr:city', 'municipality', 'city', 'county']:
                             if col in gdf_f.columns and gdf_f[col].dropna().any():
                                 val = gdf_f[col].dropna().iloc[0]
-                                if "Marburg" in val or "Biedenkopf" in val: # Ortsteil priorisieren
+                                if "Marburg" in val or "Biedenkopf" in val or "Staufenberg" in val: # Fokus-Check
                                     stadt_info = val
                                     break
                         
                         ort_sammlung[stadt_info].append({"gdf": gdf_f, "name": eintrag, "query": query})
-                    else: errors.append(f"Nicht gefunden: {strasse}")
+                    else: errors.append(f"Nicht eindeutig: {strasse}")
                 else: errors.append(f"Keine Daten: {strasse}")
             except Exception as e:
                 errors.append(f"Fehler bei {strasse}: {str(e)}")
