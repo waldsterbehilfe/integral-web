@@ -68,7 +68,7 @@ def apply_titan_style(dark, bg_active):
     sub_bg = "rgba(0, 212, 255, 0.03)" if dark else "rgba(0, 85, 255, 0.03)"
 
     # --- KONFIGURATION FÜR MAIL ---
-    EMAIL_ADRESSE = "deine.email@beispiel.de" # <-- HIER ANPASSEN
+    EMAIL_ADRESSE = "maus-p@online.de" # <-- HIER ANPASSEN
     MAIL_LINK = f"mailto:{EMAIL_ADRESSE}?subject=Feedback%20zu%20Titan%20Mapmarker"
 
     st.markdown(f"""
@@ -106,7 +106,7 @@ def apply_titan_style(dark, bg_active):
         /* SIDEBAR FEEDBACK */
         .feedback-sidebar-btn {{ font-size: 0.5rem !important; height: 1.5rem !important; opacity: 0.5; }}
         </style>
-        <a href="{MAIL_LINK}" class="copyright-branding"><b>[DEIN NAME/FIRMA]</b> © 2026</a>
+        <a href="{MAIL_LINK}" class="copyright-branding"><b>[Peter MAUS]</b> © 2026</a>
     """, unsafe_allow_html=True)
 
 # --- APP LAYOUT ---
@@ -244,3 +244,4 @@ if start_btn:
         
         if fehler:
             st.error(f"Nicht gefunden: {', '.join(fehler)}")
+
