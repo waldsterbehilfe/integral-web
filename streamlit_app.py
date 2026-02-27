@@ -55,3 +55,5 @@ if st.button("Arbeit starten"):
             st.success("Alle Karten wurden erstellt!")
             st.download_button("📂 Klicke hier für dein fertiges Karten-Paket", zip_buffer.getvalue(), 
                                file_name=f"Karten_{datetime.now().strftime('%H%M')}.zip")
+
+
