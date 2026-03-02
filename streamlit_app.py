@@ -22,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v65_input")
+geolocator = Nominatim(user_agent="integral_pro_v66_form")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -110,49 +110,52 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.5 (Intelligent Input)**")
+    st.markdown("Automatisierte Sortierung — **V6.6 (Form Input Fix)**")
 
 st.divider()
 
-# --- NEUE EINGABE-LOGIK ---
+# --- NEUE EINGABE-LOGIK MIT FORM ---
 col_in1, col_in2 = st.columns(2)
 with col_in1: 
     files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
     
-    # Live-Input mit Vervollständigung
     st.subheader("🔍 Straßensuche")
-    query_input = st.text_input("Suche", placeholder="Straße oder Ort eingeben...", label_visibility="collapsed")
-    
-    if query_input and len(query_input) > 3:
-        try:
-            # Schnelle API-Abfrage für Vorschläge
-            results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=3)
-            if results:
-                suggestion = st.selectbox("Vorschläge:", [r.address.split(',')[0] for r in results])
-                if st.button("➕ Hinzufügen"):
-                    if suggestion not in st.session_state.manual_text:
-                        st.session_state.manual_text += f"{suggestion}\n"
-                        st.rerun()
-        except: pass
+    # Formular zur sicheren Eingabe
+    with st.form("search_form"):
+        query_input = st.text_input("Straße", placeholder="Name eingeben...", label_visibility="collapsed")
+        submit_button = st.form_submit_button("➕ Hinzufügen")
+        
+        if submit_button and query_input:
+            with st.spinner("Suche..."):
+                try:
+                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=True, timeout=5)
+                    if results:
+                        st.session_state.manual_text += f"{results.address.split(',')[0]}\n"
+                        st.success(f"Gefunden: {results.address.split(',')[0]}")
+                    else:
+                        st.warning("Nicht gefunden.")
+                except:
+                    st.error("Fehler bei der Suche.")
 
 with col_in2: 
     st.subheader("📝 Eingabeliste")
-    manual_input_val = st.text_area("Straßenliste", 
-                                    value=st.session_state.manual_text,
-                                    height=200,
-                                    disabled=True) # Read-Only
+    # Das Textfeld wird nun über eine Variable befüllt
+    st.text_area("Straßenliste", 
+                 value=st.session_state.manual_text,
+                 height=200,
+                 disabled=True,
+                 key="display_text_area")
 
 strassen_liste = []
 if files:
     for f in files: strassen_liste.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
-if manual_input_val: 
-    strassen_liste.extend([s.strip() for s in manual_input_val.splitlines() if s.strip()])
+if st.session_state.manual_text: 
+    strassen_liste.extend([s.strip() for s in st.session_state.manual_text.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 
 if col_btn1.button("🚀 Analyse starten", type="primary"):
-    # manual_text wird aus session_state genutzt
     st.session_state.run_processing, st.session_state.stop_requested = True, False
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
