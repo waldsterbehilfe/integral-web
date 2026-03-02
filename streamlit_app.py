@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-009" 
+SERIAL_NUMBER = "SN-010" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -84,16 +84,19 @@ with st.sidebar:
         for ort in sorted(st.session_state.ort_sammlung.keys()):
             selected_colors[ort] = st.color_picker(f"{ort}", "#FF0000", key=f"cp_{ort}")
     st.divider()
+    
+    # --- CLEAR BUTTON ---
+    if st.button("📋 Liste leeren", use_container_width=True):
+        if os.path.exists(STREETS_FILE):
+            os.remove(STREETS_FILE)
+        st.session_state.saved_manual_streets = []
+        st.success("Liste geleert.")
+        st.rerun()
+
     if st.button("🗑️ Geocache leeren", use_container_width=True):
         shutil.rmtree(CACHE_DIR)
         os.makedirs(CACHE_DIR, exist_ok=True)
         st.success("Geocache gelöscht.")
-        st.rerun()
-    if st.button("🗑️ Manuelle Liste leeren", use_container_width=True):
-        if os.path.exists(STREETS_FILE):
-            os.remove(STREETS_FILE)
-        st.session_state.saved_manual_streets = []
-        st.success("Manuelle Liste gelöscht.")
         st.rerun()
 
 # Hintergrundfarbe
@@ -161,7 +164,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.0 (SplitInput {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.1 (ClearButton {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -224,6 +227,7 @@ with col_in2:
     # --- AKTUALISIERUNGS-BUTTON ---
     if st.button("🔄 Liste aktualisieren"):
         st.session_state.saved_manual_streets = load_streets()
+        st.rerun()
         
     # Zeige die gespeicherten Straßen an (schön formatiert)
     display_text = "\n".join(st.session_state.saved_manual_streets)
