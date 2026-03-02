@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-016" 
+SERIAL_NUMBER = "SN-017" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -69,7 +69,6 @@ if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-if 'uploaded_streets' not in st.session_state: st.session_state.uploaded_streets = []
 # Lade gespeicherte Straßen beim Start
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
 # Für Vorschläge aus dem Internet
@@ -166,7 +165,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.7 (UI Progress {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.8 (Data Merge {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -175,12 +174,20 @@ col_in1, col_in2 = st.columns(2)
 with col_in1: 
     files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
     
+    # --- AUTOMATISCHER TRANSFER ---
     if files:
-        file_streets = []
-        for f in files: file_streets.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
-        st.session_state.uploaded_streets = list(set(file_streets))
-    else:
-        st.session_state.uploaded_streets = []
+        new_streets = []
+        for f in files: 
+            file_streets = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
+            new_streets.extend(file_streets)
+        
+        # Merge mit bestehenden und Duplikate entfernen
+        merged_streets = list(set(st.session_state.saved_manual_streets + new_streets))
+        if len(merged_streets) > len(st.session_state.saved_manual_streets):
+            st.session_state.saved_manual_streets = merged_streets
+            save_streets(st.session_state.saved_manual_streets)
+            st.success(f"{len(new_streets)} Straßen aus Dateien hinzugefügt.")
+            st.rerun()
     
     st.subheader("🔍 Straßensuche (Live-Prüfung)")
     
@@ -234,12 +241,12 @@ with col_in2:
         
     # --- VERBESSERTE LISTE ---
     st.write(f"Anzahl: {len(st.session_state.saved_manual_streets)}")
-    # Statt Textarea, nutzen wir eine schicke Tabelle oder Liste
+    # Tabelle anzeigen
     df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straße | Hausnummer"])
     st.dataframe(df_list, use_container_width=True, height=200)
 
 # Finale Liste für die Analyse
-strassen_liste = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
+strassen_liste = st.session_state.saved_manual_streets
 strassen_liste = [s for s in strassen_liste if s]
 
 col_btn1, col_btn2, col_excel = st.columns([1, 1, 2])
