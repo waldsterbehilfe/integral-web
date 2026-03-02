@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-040" 
+SERIAL_NUMBER = "SN-041" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -165,7 +165,6 @@ with st.sidebar:
     
     st.subheader("🔍 Einzelne Straße suchen")
     
-    # --- AUTO-COMPLETE IMPLEMENTIERUNG ---
     query_input = st.text_input("Adresse eingeben (Strasse + Nr):", placeholder="Ringstr 10")
     
     if len(query_input) > 3:
@@ -189,8 +188,6 @@ with st.sidebar:
         if selected_address and selected_address in st.session_state.suggestion_map:
             res = st.session_state.suggestion_map[selected_address]
             raw = res.raw.get('address', {})
-            
-            # Extrahiere strukturierte Daten
             street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or selected_address.split(',')[0]
             hnr_found = raw.get('house_number', "")
             
@@ -333,9 +330,18 @@ if st.session_state.ort_sammlung:
     col_d2.download_button("Karte als HTML speichern", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
 
 else:
-    st.info("Bitte Straßen hinzufügen und die Analyse in der Sidebar starten.")
-    
-    # Zeige Tabelle zur Übersicht (SORTIERT)
+    # --- INTERAKTIVE LISTE ---
     st.write(f"📝 **Aktuelle Liste ({len(st.session_state.saved_manual_streets)})**")
-    sorted_streets = sorted(st.session_state.saved_manual_streets)
-    st.dataframe(sorted_streets, use_container_width=True)
+    
+    # DataFrame für den Editor
+    df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
+    
+    # Data Editor
+    edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True)
+    
+    # Speichern der Änderungen
+    if st.button("💾 Liste speichern"):
+        st.session_state.saved_manual_streets = edited_df["Adresse (Strasse | Nr)"].tolist()
+        save_streets(st.session_state.saved_manual_streets)
+        st.success("Liste gespeichert!")
+        st.rerun()
