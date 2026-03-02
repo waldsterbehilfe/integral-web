@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-006" 
+SERIAL_NUMBER = "SN-007" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -163,7 +163,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V7.11 (Refreshed {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V8.0 (Live Validation {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -180,12 +180,12 @@ with col_in1:
     else:
         st.session_state.uploaded_streets = []
     
-    st.subheader("🔍 Straßensuche (Online-Prüfung)")
+    st.subheader("🔍 Straßensuche (Live-Prüfung)")
     
-    # --- TEXTINPUT AUSSERHALB DES FORMS ---
+    # --- TEXTINPUT FÜR ECHTZEIT ---
     query_input = st.text_input("Name der Straße + Hausnummer:", placeholder="z.B. 'Am Markt 12'...")
     
-    # ONLINE-VALIDIERUNG (Echtzeit)
+    # --- ONLINE-VALIDIERUNG (ECHTZEIT) ---
     selected_suggestion = None
     if query_input and len(query_input) > 2:
         with st.spinner("Prüfe Schreibweise..."):
@@ -195,7 +195,7 @@ with col_in1:
                 if results:
                     # Extrahiere nur den Straßennamen
                     st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
-                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
+                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden (Vorschläge):", st.session_state.online_suggestions)
                 else:
                     st.write("Keine Übereinstimmung im Internet gefunden.")
             except:
