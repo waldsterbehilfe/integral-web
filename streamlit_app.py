@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-005" 
+SERIAL_NUMBER = "SN-006" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -163,7 +163,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V7.10 (FormFix {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V7.11 (Refreshed {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -214,6 +214,12 @@ with col_in1:
 
 with col_in2: 
     st.subheader("📝 Eingabeliste (Gespeichert)")
+    
+    # --- AKTUALISIERUNGS-BUTTON ---
+    if st.button("🔄 Liste aktualisieren"):
+        st.session_state.saved_manual_streets = load_streets()
+        st.rerun()
+        
     # Zeige die gespeicherten Straßen an
     display_text = "\n".join(st.session_state.saved_manual_streets)
     st.text_area("Straßenliste", 
