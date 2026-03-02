@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-013" 
+SERIAL_NUMBER = "SN-014" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -163,7 +163,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.4 (ErrorHandling {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.5 (LoadingSpinner {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -250,22 +250,25 @@ if col_btn2.button("🛑 Abbruch", type="secondary"):
 # --- 4. VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
     temp_ort, temp_err = defaultdict(list), []
-    pb = st.progress(0)
-    st_text = st.empty()
-    total = len(strassen_liste)
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
-        for i, future in enumerate(futures):
-            if st.session_state.stop_requested: break
-            res = future.result()
-            if res.get("success"):
-                temp_ort[res["ort"]].append(res)
-            else:
-                temp_err.append(res.get("original", "Unbekannt"))
-            
-            pb.progress((i + 1) / total)
-            st_text.text(f"🔍 Prüfe: {i+1} von {total} — {res.get('name', 'Suche...')}")
+    # --- LOADINGSPINNER ---
+    with st.spinner("Analyse läuft... Das kann einen Moment dauern."):
+        pb = st.progress(0)
+        st_text = st.empty()
+        total = len(strassen_liste)
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
+            for i, future in enumerate(futures):
+                if st.session_state.stop_requested: break
+                res = future.result()
+                if res.get("success"):
+                    temp_ort[res["ort"]].append(res)
+                else:
+                    temp_err.append(res.get("original", "Unbekannt"))
+                
+                pb.progress((i + 1) / total)
+                st_text.text(f"🔍 Prüfe: {i+1} von {total} — {res.get('name', 'Suche...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
