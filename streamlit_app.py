@@ -33,7 +33,6 @@ with st.sidebar:
     bg_toggle = st.checkbox("Hintergrundbild", value=True)
     st.divider()
     st.subheader("Wartung")
-    # NEU: Cache leeren Button
     if st.button("🗑️ Geocache leeren"):
         try:
             shutil.rmtree(CACHE_DIR)
@@ -69,8 +68,14 @@ else:
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
-def get_random_color():
-    return f"#{random.randint(0, 0xFFFFFF):06x}"
+# --- NEU: FARB-PALETTE FÜR ROTTÖNE ---
+def get_red_palette_color():
+    red_colors = [
+        "#FF0000", "#DC143C", "#FF4500", "#FF6347", "#FF7F50", 
+        "#E32636", "#C41E3A", "#8B0000", "#B22222", "#FFC0CB",
+        "#FA8072", "#FF8C00", "#FFD700"
+    ]
+    return random.choice(red_colors)
 
 def verarbeite_strasse(strasse):
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
@@ -110,7 +115,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V5.0 (mit Cache-Button)**")
+    st.markdown("Automatisierte Sortierung — **V5.1 (Rot-Töne)**")
 
 st.divider()
 
@@ -166,8 +171,13 @@ if st.session_state.run_processing and strassen_liste:
     if ort_sammlung and not st.session_state.stop_requested:
         m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
         
+        # Zuweisung von festen Farben für jeden Ortsteil aus der Palette
+        ort_color_map = {}
         for ort in sorted(ort_sammlung.keys()):
-            color = get_random_color()
+            ort_color_map[ort] = get_red_palette_color()
+        
+        for ort in sorted(ort_sammlung.keys()):
+            color = ort_color_map[ort]
             fg = folium.FeatureGroup(name=f"📍 {ort} ({len(ort_sammlung[ort])} Str.)")
             
             for item in ort_sammlung[ort]:
