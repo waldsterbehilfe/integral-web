@@ -10,8 +10,11 @@ from datetime import datetime
 from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
+# --- 0. SERIENNUMMER ---
+SERIAL_NUMBER = "SN-002" 
+
 # --- 1. SETUP & THEME ---
-st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
+st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
 
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
@@ -25,7 +28,7 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent="integral_pro_v75_validation")
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}")
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -52,6 +55,7 @@ if 'online_suggestions' not in st.session_state: st.session_state.online_suggest
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
+    st.markdown(f"**Version:** `{SERIAL_NUMBER}`")
     st.divider()
     selected_colors = {}
     if st.session_state.ort_sammlung:
@@ -135,7 +139,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V7.5 (Online Validation)**")
+    st.markdown(f"Automatisierte Sortierung — **V7.7 (Serialized {SERIAL_NUMBER})**")
 
 st.divider()
 
