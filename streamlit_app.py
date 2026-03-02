@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-036" 
+SERIAL_NUMBER = "SN-037" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -109,14 +109,14 @@ def verarbeite_strasse(strasse_input):
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # 1. Finde die Geometrie der Straße
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=30)
+        # 1. Finde die Geometrie der Straße (DIST ANZ PASSENDE FILTERUNG ERHÖHT)
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=50) # Distanz erhöht
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
 
-        # 2. Filtere auf den exakten Namen
-        gdf = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
+        # 2. Filtere auf den exakten Namen (TOLEANTERER FILTER)
+        gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
@@ -130,6 +130,8 @@ def verarbeite_strasse(strasse_input):
 
         # 3. Ortsteil bestimmen
         gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
+        
+        # Kompletten Namen nehmen
         osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
         
         ortsteil = "Unbekannt"
