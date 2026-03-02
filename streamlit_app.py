@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-019" 
+SERIAL_NUMBER = "SN-020" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -138,7 +138,6 @@ def verarbeite_strasse(strasse_input):
             # Nutze einheitliches Koordinatensystem für berechnung
             gdf_proj = gdf.to_crs(epsg=3857)
             centroid = gdf_proj.geometry.unary_union.centroid
-            # Korrigierte Syntax hier
             point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs="EPSG:3857").to_crs("EPSG:4326")
             marker_coords = (point_gdf.geometry.y[0], point_gdf.geometry.x[0])
 
@@ -176,7 +175,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.10 (PreciseMarkers {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.11 (ParsingFix {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -232,7 +231,13 @@ with col_in1:
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
-            street_to_save = f"{selected_suggestion.split(',')[0]} | {query_hnr}".strip(" |")
+            # --- PARSING FIX HIER ---
+            # Wir nehmen nur den ersten Teil der Adresse als Straße
+            street_name = selected_suggestion.split(',')[0].strip()
+            
+            # Falls im Straßennamen selbst schon eine Hausnummer steckt (z.B. "Steinweg 7")
+            # trennen wir diese ab, wenn nötig. Für die Speicherung ist das okay.
+            street_to_save = f"{street_name} | {query_hnr}".strip(" |")
             
             if street_to_save not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(street_to_save)
