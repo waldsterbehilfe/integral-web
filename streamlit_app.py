@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 
 # --- 1. SETUP ---
-st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
@@ -46,12 +46,17 @@ def verarbeite_strasse(strasse):
     return None
 
 # --- 3. UI ---
-col_logo, col_title = st.columns([1, 4])
+# --- ANGEPASSTER HEADER (Logo direkt vor Überschrift) ---
+col_logo, col_title = st.columns([1, 10]) # Spaltenverhältnis angepasst
 with col_logo:
-    st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=150)
+    st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
+
 with col_title:
-    st.title("🛡️ INTEGRAL PRO")
+    # Blaues Schild gelöscht
+    st.title("INTEGRAL PRO")
     st.markdown("Automatisierte Straßensortierung — **Landkreis Marburg-Biedenkopf**")
+
+st.divider()
 
 st.subheader("📝 Dateneingabe")
 col_input1, col_input2 = st.columns(2)
