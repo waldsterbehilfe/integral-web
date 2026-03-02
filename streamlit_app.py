@@ -11,10 +11,9 @@ from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
 import streamlit.components.v1 as components
 
-# --- 1. SETUP & THEME (Fix auf Dunkel) ---
+# --- 1. SETUP & THEME ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Hintergrundbild Link (Raw)
 GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
 
 # --- 2. LOGIK & CACHE ---
@@ -27,95 +26,78 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-# --- THEME SWITCHER UI & CACHE BUTTON (Sidebar) ---
+# Session State initialisieren
+if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
+if 'run_processing' not in st.session_state: st.session_state.run_processing = False
+if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
+
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
     bg_toggle = st.checkbox("Hintergrundbild", value=True)
+    st.divider()
+    
+    # NEU: Farbwahl für Ebenen
+    st.subheader("Ebenen-Farben")
+    selected_colors = {}
+    if st.session_state.ort_sammlung:
+        for ort in sorted(st.session_state.ort_sammlung.keys()):
+            # Standardmäßig Rot (#FF0000)
+            selected_colors[ort] = st.color_picker(f"Farbe für {ort}", "#FF0000", key=f"cp_{ort}")
+    else:
+        st.info("Farben erscheinen nach der Analyse.")
+    
     st.divider()
     st.subheader("Wartung")
     if st.button("🗑️ Geocache leeren"):
         try:
             shutil.rmtree(CACHE_DIR)
             os.makedirs(CACHE_DIR, exist_ok=True)
-            st.success("Cache wurde geleert!")
+            st.success("Cache geleert!")
             st.rerun()
         except Exception as e:
-            st.error(f"Fehler beim Leeren: {e}")
-    st.divider()
+            st.error(f"Fehler: {e}")
 
-# Hintergrundbild Logik via CSS
+# Styling
 if bg_toggle:
-    st.markdown(f"""
-        <style>
-            .stApp {{
-                background-image: url('{GITHUB_BG_URL}');
-                background-size: cover;
-                background-attachment: fixed;
-                background-color: #0E1117;
-            }}
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown(f"<style>.stApp {{background-image: url('{GITHUB_BG_URL}'); background-size: cover; background-attachment: fixed; background-color: #0E1117;}}</style>", unsafe_allow_html=True)
 else:
-    st.markdown("""
-        <style>
-            .stApp {
-                background-image: none;
-                background-color: #0E1117;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown("<style>.stApp {background-image: none; background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-if 'run_processing' not in st.session_state: st.session_state.run_processing = False
-if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-
-# --- FARB-PALETTE FÜR ROTTÖNE ---
-def get_red_palette_color():
-    red_colors = [
-        "#FF0000", "#DC143C", "#FF4500", "#FF6347", "#FF7F50", 
-        "#E32636", "#C41E3A", "#8B0000", "#B22222", "#FF1493",
-        "#FA8072", "#FF8C00", "#FFD700"
-    ]
-    return random.choice(red_colors)
-
+# --- VERARBEITUNG FUNKTION ---
 def verarbeite_strasse(strasse):
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
-    
     try:
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=500)
-        
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
             if 'name' in gdf.columns:
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
                 gdf_f = gdf
-
-            if not gdf.empty:
-                ortsteil = "Unbekannter_Ort"
+            if not gdf_f.empty:
+                ortsteil = "Unbekannt"
                 centroid = gdf_f.geometry.centroid.iloc[0]
                 location = reverse((centroid.y, centroid.x), language='de')
-                
                 if location and 'address' in location.raw:
                     addr = location.raw['address']
                     for key in ['village', 'hamlet', 'suburb', 'city_district', 'town']:
                         if key in addr:
                             ortsteil = addr[key]
                             break
-                
                 return {"gdf": gdf_f, "ort": ortsteil, "name": s_clean, "success": True}
-    except Exception as e:
-        return {"success": False, "original": strasse, "error": str(e)}
-        
+    except:
+        return {"success": False, "original": strasse}
     return {"success": False, "original": strasse}
 
-# --- 3. UI ---
+# --- 3. UI HAUPTFENSTER ---
 col_logo, col_title = st.columns([1, 10])
 with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V5.2 (Confetti Edition)**")
+    st.markdown("Automatisierte Sortierung — **V5.4 (Color Picker)**")
 
 st.divider()
 
@@ -123,7 +105,7 @@ col_in1, col_in2 = st.columns(2)
 with col_in1:
     uploaded_files = st.file_uploader("Dateien laden (.txt)", type=["txt"], accept_multiple_files=True)
 with col_in2:
-    manual_input = st.text_area("Manuelle Eingabe", placeholder="z.B. Schweinsberger Str", height=126)
+    manual_input = st.text_area("Manuelle Eingabe", placeholder="Straßen untereinander...", height=126)
 
 strassen_liste = []
 if uploaded_files:
@@ -133,11 +115,11 @@ if manual_input:
     strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
-# Buttons
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
     st.session_state.stop_requested = False
+
 if col_btn2.button("🛑 Abbruch", type="secondary"):
     st.session_state.stop_requested = True
 
@@ -145,86 +127,54 @@ if col_btn2.button("🛑 Abbruch", type="secondary"):
 if st.session_state.run_processing and strassen_liste:
     ort_sammlung = defaultdict(list)
     fehler_liste = []
-    all_geoms = [] 
-    
     prog_bar = st.progress(0)
     status_text = st.empty()
     
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
-            if st.session_state.stop_requested:
-                status_text.warning("⏹️ Verarbeitung gestoppt.")
-                break
-            
+            if st.session_state.stop_requested: break
             res = future.result()
             if res["success"]:
                 ort_sammlung[res["ort"]].append(res)
-                all_geoms.append(res["gdf"])
             else:
                 fehler_liste.append(res["original"])
-            
             prog_bar.progress((i + 1) / len(strassen_liste))
-            status_text.text(f"🔍 {res.get('name', res.get('original'))} ({i+1}/{len(strassen_liste)})")
+            status_text.text(f"🔍 {res.get('name', res.get('original'))}")
 
-    # --- 5. ERGEBNIS-GENERIERUNG & ANZEIGE ---
-    if ort_sammlung and not st.session_state.stop_requested:
-        m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
-        
-        # Zuweisung von festen Farben für jeden Ortsteil
-        ort_color_map = {}
-        for ort in sorted(ort_sammlung.keys()):
-            ort_color_map[ort] = get_red_palette_color()
-        
-        for ort in sorted(ort_sammlung.keys()):
-            color = ort_color_map[ort]
-            fg = folium.FeatureGroup(name=f"📍 {ort} ({len(ort_sammlung[ort])} Str.)")
-            
-            for item in ort_sammlung[ort]:
-                # Robustes GeoJSON Rendering
-                gdf = item["gdf"]
-                if not gdf.empty:
-                    # Umwandlung für Folium Kompatibilität
-                    geojson_data = gdf.__geo_interface__
-                    
-                    folium.GeoJson(
-                        geojson_data,
-                        style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
-                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
-                    ).add_to(fg)
-            fg.add_to(m)
-        
-        folium.LayerControl(collapsed=False).add_to(m)
-        
-        if all_geoms:
-            combined = gpd.GeoDataFrame(pd.concat(all_geoms))
-            b = combined.total_bounds 
-            m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
-
-        # --- NEU: VISUELLER EFFEKT ---
-        st.balloons() # Das ist der Streamlit-Konfetti Effekt!
-        st.success(f"✅ Fertig! {len(ort_sammlung)} Ortsteile/Ebenen erkannt.")
-        
-        # --- DIREKTE ANZEIGE ---
-        st.subheader("Interaktive Karte")
-        try:
-            html_string = m._repr_html_()
-            components.html(html_string, height=600)
-            
-            # Optionaler Download
-            st.download_button(
-                label="📥 Karte als HTML Datei herunterladen",
-                data=html_string,
-                file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
-                mime="text/html"
-            )
-        except Exception as e:
-            st.error(f"Fehler beim Rendern der Karte: {e}")
-
-    if fehler_liste and not st.session_state.stop_requested:
-        with st.expander("⚠️ Nicht gefundene Straßen"):
-            st.write(", ".join(fehler_liste))
-
+    st.session_state.ort_sammlung = dict(ort_sammlung)
     st.session_state.run_processing = False
-    st.session_state.stop_requested = False
+    st.balloons()
+    st.rerun() # Seite neu laden, um Farbwähler anzuzeigen
+
+# --- 5. KARTE RENDERN ---
+if st.session_state.ort_sammlung:
+    m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
+    all_geoms = []
+
+    for ort, items in st.session_state.ort_sammlung.items():
+        # Farbe aus der Sidebar nutzen (oder Standard Rot)
+        color = selected_colors.get(ort, "#FF0000")
+        fg = folium.FeatureGroup(name=f"📍 {ort} ({len(items)} Str.)")
+        
+        for item in items:
+            gdf = item["gdf"]
+            all_geoms.append(gdf)
+            folium.GeoJson(
+                gdf.__geo_interface__,
+                style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
+                tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:'])
+            ).add_to(fg)
+        fg.add_to(m)
+    
+    folium.LayerControl(collapsed=False).add_to(m)
+    
+    if all_geoms:
+        combined = gpd.GeoDataFrame(pd.concat(all_geoms))
+        b = combined.total_bounds 
+        m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
+
+    st.subheader("Ergebnis-Karte")
+    html_string = m._repr_html_()
+    components.html(html_string, height=600)
+    st.download_button(label="📥 Karte speichern", data=html_string, file_name="Karte.html", mime="text/html")
