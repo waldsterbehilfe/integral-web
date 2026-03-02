@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-034" 
+SERIAL_NUMBER = "SN-036" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -80,13 +80,13 @@ if 'run_processing' not in st.session_state: st.session_state.run_processing = F
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
 if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
+if 'show_markers' not in st.session_state: st.session_state.show_markers = False
 
 # Hintergrundfarbe & Style
 st.markdown("""
 <style>
     .stApp {background-color: #0E1117;}
     [data-testid="stSidebar"] {background-color: #161b22;}
-    .css-1544g2n {padding: 1rem 1rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,12 +187,22 @@ with st.sidebar:
 
     if st.button("➕ Straße hinzufügen", use_container_width=True):
         if selected_suggestion:
-            full_street_address = selected_suggestion.split(',')[0].strip()
-            if query_hnr and query_hnr in full_street_address:
-                final_street_name = full_street_address.replace(query_hnr, "").strip()
+            full_address = selected_suggestion.split(',')[0].strip()
+            
+            match_start = re.match(r'^(\d+\w*)\s+(.*)', full_address)
+            match_end = re.match(r'^(.*?)\s+(\d+\w*)$', full_address)
+
+            if match_start:
+                hnr_found = match_start.group(1)
+                street_found = match_start.group(2)
+            elif match_end:
+                street_found = match_end.group(1)
+                hnr_found = match_end.group(2)
             else:
-                final_street_name = full_street_address
-            street_to_save = f"{final_street_name} | {query_hnr}".strip(" |")
+                street_found = full_address
+                hnr_found = ""
+
+            street_to_save = f"{street_found} | {hnr_found}".strip(" |")
             if street_to_save not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
@@ -270,8 +280,12 @@ if st.session_state.run_processing:
 # 5. ANZEIGE
 if st.session_state.ort_sammlung:
     
-    # Farben für Ortsteile
+    # Farben & Marker Steuerung
     st.sidebar.divider()
+    st.sidebar.subheader("🎨 Darstellung")
+    st.session_state.show_markers = st.sidebar.checkbox("📍 Marker anzeigen", value=st.session_state.show_markers)
+    
+    st.sidebar.markdown("---")
     st.sidebar.subheader("🎨 Ortsteil Farben")
     for ort in sorted(st.session_state.ort_sammlung.keys()):
         st.sidebar.color_picker(ort, "#FF0000", key=f"cp_{ort}")
@@ -283,7 +297,9 @@ if st.session_state.ort_sammlung:
     # Karte
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
-    marker_fg = folium.FeatureGroup(name="📍 Marker (mit HNR)")
+    
+    # Marker Feature Group
+    marker_fg = folium.FeatureGroup(name="📍 Marker")
 
     for ort, items in st.session_state.ort_sammlung.items():
         color = st.session_state.get(f"cp_{ort}", "#FF0000")
@@ -293,11 +309,15 @@ if st.session_state.ort_sammlung:
             folium.GeoJson(item["gdf"].__geo_interface__,
                            style_function=lambda x, c=color: {'color': c, 'weight': 5, 'opacity': 0.7},
                            tooltip=f"{item['name']} ({ort})").add_to(fg)
-            if item.get("marker"):
+            
+            # Marker Logik mit Switch
+            if item.get("marker") and st.session_state.show_markers:
                 folium.Marker(location=item["marker"], popup=f"{item['original']}", icon=folium.Icon(color="blue", icon="info-sign")).add_to(marker_fg)
         fg.add_to(m)
     
-    marker_fg.add_to(m)
+    if st.session_state.show_markers:
+        marker_fg.add_to(m)
+        
     folium.LayerControl(collapsed=False).add_to(m)
     
     if all_geoms:
@@ -315,7 +335,7 @@ if st.session_state.ort_sammlung:
         excel_data = create_excel_download(st.session_state.ort_sammlung)
         col_d1.download_button("Excel Analyse herunterladen", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     except ImportError:
-        col_d1.error("xlsxwriter fehlt. Bitte requirements.txt prüfen.")
+        col_d1.error("xlsxwriter fehlt.")
     col_d2.download_button("Karte als HTML speichern", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
 
 else:
@@ -323,5 +343,5 @@ else:
     
     # Zeige Tabelle zur Übersicht (SORTIERT)
     st.write(f"📝 **Aktuelle Liste ({len(st.session_state.saved_manual_streets)})**")
-    sorted_streets = sorted(st.session_state.saved_manual_streets) # HIER WIRD SORTIERT
+    sorted_streets = sorted(st.session_state.saved_manual_streets)
     st.dataframe(sorted_streets, use_container_width=True)
