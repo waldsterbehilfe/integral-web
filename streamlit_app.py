@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-041" 
+SERIAL_NUMBER = "SN-042" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -86,7 +86,6 @@ if 'show_markers' not in st.session_state: st.session_state.show_markers = False
 st.markdown("""
 <style>
     .stApp {background-color: #0E1117;}
-    [data-testid="stSidebar"] {background-color: #161b22;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -156,95 +155,91 @@ def verarbeite_strasse(strasse_input):
 
 # --- 3. UI LAYOUT ---
 
-# --- SIDEBAR: KONFIGURATION & EINGABE ---
-with st.sidebar:
-    st.image(LOGO_URL, width=150)
+# Top Header
+col_h1, col_h2 = st.columns([1, 4])
+with col_h1: st.image(LOGO_URL, width=150)
+with col_h2: 
     st.title("Integral Pro")
-    st.markdown(f"**Version:** {SERIAL_NUMBER}")
-    st.divider()
-    
-    st.subheader("🔍 Einzelne Straße suchen")
-    
-    query_input = st.text_input("Adresse eingeben (Strasse + Nr):", placeholder="Ringstr 10")
-    
-    if len(query_input) > 3:
-        with st.spinner("Suche..."):
-            try:
-                results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
-                if results:
-                    st.session_state.suggestion_map = {r.address: r for r in results}
-                    selected_address = st.selectbox("Vorschläge:", list(st.session_state.suggestion_map.keys()))
-                else:
-                    st.write("Keine Übereinstimmung.")
-                    st.session_state.suggestion_map = {}
-                    selected_address = None
-            except Exception as e:
-                st.error(f"Fehler: {e}")
-                selected_address = None
-    else:
-        selected_address = None
+    st.markdown(f"**Version:** {SERIAL_NUMBER} | GIS Dashboard")
 
-    if st.button("➕ Straße hinzufügen", use_container_width=True):
-        if selected_address and selected_address in st.session_state.suggestion_map:
-            res = st.session_state.suggestion_map[selected_address]
-            raw = res.raw.get('address', {})
-            street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or selected_address.split(',')[0]
-            hnr_found = raw.get('house_number', "")
-            
-            street_to_save = f"{street_found} | {hnr_found}".strip(" |")
-            
-            if street_to_save not in st.session_state.saved_manual_streets:
-                st.session_state.saved_manual_streets.append(street_to_save)
-                save_streets(st.session_state.saved_manual_streets)
-                st.success(f"Hinzugefügt: {street_to_save}")
-                st.rerun()
-
-    st.divider()
-    st.subheader("📥 Dateneingabe")
-    files = st.file_uploader("Upload TXT Dateien", type=["txt"], accept_multiple_files=True)
-    if files:
-        new_streets = []
-        for f in files: 
-            file_streets = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
-            new_streets.extend(file_streets)
-        
-        merged_streets = list(set(st.session_state.saved_manual_streets + new_streets))
-        if len(merged_streets) > len(st.session_state.saved_manual_streets):
-            st.session_state.saved_manual_streets = merged_streets
-            save_streets(st.session_state.saved_manual_streets)
-            st.success(f"{len(new_streets)} Straßen hinzugefügt.")
-            st.rerun()
-
-    st.divider()
-    st.subheader("⚙️ Aktionen")
-    col_c1, col_c2 = st.columns(2)
-    if col_c1.button("📋 Liste leeren", use_container_width=True):
-        if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
-        st.session_state.saved_manual_streets = []
-        st.rerun()
-    if col_c2.button("🗑️ Cache leeren", use_container_width=True):
-        clear_all_caches()
-        st.rerun()
-    
-    st.divider()
-    if st.button("🚀 Analyse starten", type="primary", use_container_width=True):
-        st.session_state.run_processing, st.session_state.stop_requested = True, False
-        st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
-    if st.button("🛑 Abbruch", type="secondary", use_container_width=True):
-        st.session_state.stop_requested, st.session_state.run_processing = False, False
-        st.rerun()
-
-# --- MAIN AREA: MAP & RESULTS ---
-st.title("🌐 GIS Dashboard")
 st.markdown("---")
 
-# KPI Metriken
-if st.session_state.saved_manual_streets:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Straßen in Liste", len(st.session_state.saved_manual_streets))
-    if st.session_state.ort_sammlung:
-        c2.metric("Gefundene Ortsteile", len(st.session_state.ort_sammlung))
-        c3.metric("Fehler", len(st.session_state.fehler_liste))
+# --- CONTROL PANEL ---
+with st.container():
+    st.subheader("⚙️ Steuerung")
+    c_col1, c_col2, c_col3, c_col4 = st.columns(4)
+    
+    with c_col1:
+        query_input = st.text_input("Adresse eingeben (Strasse + Nr):", placeholder="Ringstr 10")
+        if len(query_input) > 3:
+            with st.spinner("Suche..."):
+                try:
+                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
+                    if results:
+                        st.session_state.suggestion_map = {r.address: r for r in results}
+                        selected_address = st.selectbox("Vorschläge:", list(st.session_state.suggestion_map.keys()))
+                    else:
+                        st.write("Keine Übereinstimmung.")
+                        st.session_state.suggestion_map = {}
+                        selected_address = None
+                except Exception as e:
+                    st.error(f"Fehler: {e}")
+                    selected_address = None
+        else:
+            selected_address = None
+        
+        if st.button("➕ Straße hinzufügen", use_container_width=True):
+            if selected_address and selected_address in st.session_state.suggestion_map:
+                res = st.session_state.suggestion_map[selected_address]
+                raw = res.raw.get('address', {})
+                street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or selected_address.split(',')[0]
+                hnr_found = raw.get('house_number', "")
+                street_to_save = f"{street_found} | {hnr_found}".strip(" |")
+                
+                if street_to_save not in st.session_state.saved_manual_streets:
+                    st.session_state.saved_manual_streets.append(street_to_save)
+                    save_streets(st.session_state.saved_manual_streets)
+                    st.success(f"Hinzugefügt: {street_to_save}")
+                    st.rerun()
+
+    with c_col2:
+        st.write("**Dateneingabe**")
+        files = st.file_uploader("Upload TXT Dateien", type=["txt"], accept_multiple_files=True, label_visibility="collapsed")
+        if files:
+            new_streets = []
+            for f in files: 
+                file_streets = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
+                new_streets.extend(file_streets)
+            
+            merged_streets = list(set(st.session_state.saved_manual_streets + new_streets))
+            if len(merged_streets) > len(st.session_state.saved_manual_streets):
+                st.session_state.saved_manual_streets = merged_streets
+                save_streets(st.session_state.saved_manual_streets)
+                st.success(f"{len(new_streets)} Straßen hinzugefügt.")
+                st.rerun()
+
+    with c_col3:
+        st.write("**Aktionen**")
+        col_c_a1, col_c_a2 = st.columns(2)
+        if col_c_a1.button("📋 Liste leeren", use_container_width=True):
+            if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+            st.session_state.saved_manual_streets = []
+            st.rerun()
+        if col_c_a2.button("🗑️ Cache leeren", use_container_width=True):
+            clear_all_caches()
+            st.rerun()
+
+    with c_col4:
+        st.write("**Analyse**")
+        if st.button("🚀 Analyse starten", type="primary", use_container_width=True):
+            st.session_state.run_processing, st.session_state.stop_requested = True, False
+            st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
+            st.rerun()
+        if st.button("🛑 Abbruch", type="secondary", use_container_width=True):
+            st.session_state.stop_requested, st.session_state.run_processing = False, False
+            st.rerun()
+
+st.markdown("---")
 
 # 4. VERARBEITUNG
 if st.session_state.run_processing:
@@ -271,15 +266,14 @@ if st.session_state.run_processing:
 # 5. ANZEIGE
 if st.session_state.ort_sammlung:
     
-    # Farben & Marker Steuerung
-    st.sidebar.divider()
-    st.sidebar.subheader("🎨 Darstellung")
-    st.session_state.show_markers = st.sidebar.checkbox("📍 Marker anzeigen", value=st.session_state.show_markers)
-    
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🎨 Ortsteil Farben")
-    for ort in sorted(st.session_state.ort_sammlung.keys()):
-        st.sidebar.color_picker(ort, "#FF0000", key=f"cp_{ort}")
+    # Darstellung Optionen
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        st.session_state.show_markers = st.checkbox("📍 Marker anzeigen", value=st.session_state.show_markers)
+    with col_opt2:
+        st.write("🎨 Ortsteil Farben")
+        for ort in sorted(st.session_state.ort_sammlung.keys()):
+            st.color_picker(ort, "#FF0000", key=f"cp_{ort}")
 
     if st.session_state.fehler_liste:
         with st.expander("⚠️ Nicht gefundene Straßen"):
@@ -288,8 +282,6 @@ if st.session_state.ort_sammlung:
     # Karte
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
-    
-    # Marker Feature Group
     marker_fg = folium.FeatureGroup(name="📍 Marker")
 
     for ort, items in st.session_state.ort_sammlung.items():
@@ -301,7 +293,6 @@ if st.session_state.ort_sammlung:
                            style_function=lambda x, c=color: {'color': c, 'weight': 5, 'opacity': 0.7},
                            tooltip=f"{item['name']} ({ort})").add_to(fg)
             
-            # Marker Logik mit Switch
             if item.get("marker") and st.session_state.show_markers:
                 folium.Marker(location=item["marker"], popup=f"{item['original']}", icon=folium.Icon(color="blue", icon="info-sign")).add_to(marker_fg)
         fg.add_to(m)
@@ -333,13 +324,10 @@ else:
     # --- INTERAKTIVE LISTE ---
     st.write(f"📝 **Aktuelle Liste ({len(st.session_state.saved_manual_streets)})**")
     
-    # DataFrame für den Editor
     df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
     
-    # Data Editor
     edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True)
     
-    # Speichern der Änderungen
     if st.button("💾 Liste speichern"):
         st.session_state.saved_manual_streets = edited_df["Adresse (Strasse | Nr)"].tolist()
         save_streets(st.session_state.saved_manual_streets)
