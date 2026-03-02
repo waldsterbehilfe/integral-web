@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-025" 
+SERIAL_NUMBER = "SN-027" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -30,7 +30,7 @@ ox.settings.cache_folder = CACHE_DIR
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
 # --- OPTIMIERUNG: Timeout für geolocator ---
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=5)
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -42,6 +42,15 @@ def load_streets():
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
             return [line.strip() for line in f.readlines() if line.strip()]
     return []
+
+def clear_all_caches():
+    if os.path.exists(CACHE_DIR):
+        shutil.rmtree(CACHE_DIR)
+        os.makedirs(CACHE_DIR, exist_ok=True)
+    ox.settings.use_cache = False
+    ox.settings.use_cache = True
+    st.cache_data.clear()
+    st.cache_resource.clear()
 
 # --- HILFSFUNKTION FÜR EXCEL-EXPORT ---
 def create_excel_download(ort_sammlung):
@@ -69,77 +78,79 @@ if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-# Lade gespeicherte Straßen beim Start
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
-# Für Vorschläge aus dem Internet
 if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
 
 # Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-# --- FUNKTION (MIT HAUSNUMMERN-SUPPORT) ---
+# --- FUNKTION (MIT STRIKTER FILTERUNG) ---
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # --- OPTIMIERUNG: Längere Pause zur Server-Schonung ---
-    time.sleep(random.uniform(0.8, 1.5))
+    # --- PAUSE ---
+    time.sleep(random.uniform(1.0, 1.8))
     
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
-        strasse_name = parts[0]
-        hnr = parts[1]
+        strasse_name = parts[0].strip()
+        hnr = parts[1].strip()
     else:
-        strasse_name = strasse_input
+        strasse_name = strasse_input.strip()
         hnr = None
 
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_name).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # Finde Straße - DISTANZ REDUZIERT FÜR PRÄZISION
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=50)
+        # 1. Finde die Geometrie der Straße
+        # dist klein halten, damit nur diese Straße gefunden wird
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=30)
         
-        # --- PRÄZISERE MARKER-LOGIK ---
+        if gdf.empty:
+            return {"success": False, "original": strasse_input}
+
+        # 2. Filtere auf den exakten Namen, um "Beifang" zu vermeiden
+        gdf = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
+        
+        if gdf.empty:
+            return {"success": False, "original": strasse_input}
+
+        # --- PRÄZISERE MARKER-LOGIK (NUR BEI HNR) ---
         marker_coords = None
-        
-        # 1. ZUERST VERSUCHEN: Exakte Hausnummern-Koordinate
         if hnr:
-            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
+            # Versuche exakte Koordinate für Straße + HNR
+            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=10)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
-        
-        # 2. RÜCKFALL: Wenn keine HNR gefunden wurde, zentrum der gefundenen Straße
-        if not marker_coords and not gdf.empty:
-            gdf_proj = gdf.to_crs(epsg=3857)
-            centroid = gdf_proj.geometry.unary_union.centroid
-            point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs="EPSG:3857").to_crs("EPSG:4326")
-            marker_coords = (point_gdf.geometry.y[0], point_gdf.geometry.x[0])
 
-        if not gdf.empty:
-            gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
-            osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
-            
-            ortsteil = "Unbekannt"
-            if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
-            elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
-            
-            if ortsteil == "Unbekannt":
-                try:
-                    centroid = gdf.geometry.unary_union.centroid
-                    loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=3)
-                    if loc_rev and 'address' in loc_rev.raw:
-                        a = loc_rev.raw['address']
-                        ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
-                except: pass
-            
-            return {
-                "gdf": gdf, 
-                "ort": ortsteil, 
-                "name": osm_name, 
-                "original": strasse_input, 
-                "marker": marker_coords, 
-                "success": True
-            }
+        # 3. Ortsteil bestimmen
+        gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
+        osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
+        
+        ortsteil = "Unbekannt"
+        # Versuche Ortsteil aus OSM Daten zu lesen
+        if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
+        elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
+        
+        # Fallback auf reverse Geocoding (etwas ungenauer, aber oft nötig)
+        if ortsteil == "Unbekannt" or pd.isna(ortsteil):
+            try:
+                centroid = gdf.geometry.unary_union.centroid
+                loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=3)
+                if loc_rev and 'address' in loc_rev.raw:
+                    a = loc_rev.raw['address']
+                    ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
+            except: pass
+        
+        return {
+            "gdf": gdf, 
+            "ort": ortsteil, 
+            "name": osm_name, 
+            "original": strasse_input, 
+            "marker": marker_coords, 
+            "success": True
+        }
     except:
         pass
     return {"success": False, "original": strasse_input}
@@ -149,7 +160,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.16 (PreciseMarking {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.18 (StrictFilter {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -175,10 +186,9 @@ with st.expander("⚙️ Einstellungen", expanded=False):
             st.success("Liste geleert.")
             st.rerun()
 
-        if st.button("🗑️ Geocache leeren", use_container_width=True):
-            shutil.rmtree(CACHE_DIR)
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            st.success("Geocache gelöscht.")
+        if st.button("🗑️ Cache komplett leeren", use_container_width=True):
+            clear_all_caches()
+            st.success("Alle Caches (Persistent, OSMNx, Streamlit) wurden geleert.")
             st.rerun()
 
 # --- EINGABE-LOGIK ---
@@ -193,7 +203,6 @@ with col_in1:
             file_streets = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
             new_streets.extend(file_streets)
         
-        # Merge mit bestehenden und Duplikate entfernen
         merged_streets = list(set(st.session_state.saved_manual_streets + new_streets))
         if len(merged_streets) > len(st.session_state.saved_manual_streets):
             st.session_state.saved_manual_streets = merged_streets
@@ -216,7 +225,6 @@ with col_in1:
     if len(query_street) > 2:
         with st.spinner("Prüfe Schreibweise..."):
             try:
-                # Mehr Zeit für die Anfrage
                 results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=10)
                 if results:
                     st.session_state.online_suggestions = [r.address for r in results]
@@ -233,14 +241,12 @@ with col_in1:
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
-            # Parsing Fix
             full_street_address = selected_suggestion.split(',')[0].strip()
             if query_hnr and query_hnr in full_street_address:
                 final_street_name = full_street_address.replace(query_hnr, "").strip()
             else:
                 final_street_name = full_street_address
             
-            # 3. Zusammenbauen
             street_to_save = f"{final_street_name} | {query_hnr}".strip(" |")
             
             if street_to_save not in st.session_state.saved_manual_streets:
@@ -253,15 +259,13 @@ with col_in2:
     st.subheader("📝 Eingabeliste (Gespeichert)")
     
     if st.button("🔄 Liste aktualisieren"):
-        shutil.rmtree(CACHE_DIR)
-        os.makedirs(CACHE_DIR, exist_ok=True)
+        clear_all_caches()
         st.session_state.saved_manual_streets = load_streets()
         st.success("Daten wurden frisch aus dem Netz geladen.")
         st.rerun()
         
     # --- VERBESSERTE LISTE ---
     st.write(f"Anzahl: {len(st.session_state.saved_manual_streets)}")
-    # Tabelle anzeigen
     df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straße | Hausnummer"])
     st.dataframe(df_list, use_container_width=True, height=200)
 
@@ -300,7 +304,7 @@ if st.session_state.run_processing and strassen_liste:
                 else:
                     temp_err.append(res.get("original", "Unbekannt"))
                 
-                # --- VERBESSERTE FORTSCHRITTANZEIGE "X/Y Straßen" ---
+                # --- FORTSCHRITTANZEIGE "X/Y Straßen" ---
                 current_progress = (i + 1) / total
                 pb.progress(current_progress)
                 st_text.text(f"🔍 Fortschritt: {i+1}/{total} Straßen — Verarbeite: {res.get('name', '...')}")
@@ -331,9 +335,11 @@ if st.session_state.ort_sammlung:
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
                            tooltip=f"Gefunden: {item['name']}").add_to(fg)
             
+            # --- NUR MARKER WENN HNR BEKANNT ---
             if item.get("marker"):
                 folium.Marker(
                     location=item["marker"],
+                    # Zeige originale Eingabe im Popup
                     popup=f"Adresse: {item['original']}",
                     icon=folium.Icon(color="blue", icon="info-sign")
                 ).add_to(marker_fg)
