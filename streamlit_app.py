@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-018" 
+SERIAL_NUMBER = "SN-019" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -138,8 +138,8 @@ def verarbeite_strasse(strasse_input):
             # Nutze einheitliches Koordinatensystem für berechnung
             gdf_proj = gdf.to_crs(epsg=3857)
             centroid = gdf_proj.geometry.unary_union.centroid
-            # Zurück auf WGS84 für Kartenanzeige
-            point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs=epsg=3857).to_crs(epsg=4326)
+            # Korrigierte Syntax hier
+            point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs="EPSG:3857").to_crs("EPSG:4326")
             marker_coords = (point_gdf.geometry.y[0], point_gdf.geometry.x[0])
 
         if not gdf.empty:
@@ -176,7 +176,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.9 (PreciseMarkers {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.10 (PreciseMarkers {SERIAL_NUMBER})**")
 
 st.divider()
 
