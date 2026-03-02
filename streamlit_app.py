@@ -68,11 +68,11 @@ else:
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
-# --- NEU: FARB-PALETTE FÜR ROTTÖNE ---
+# --- FARB-PALETTE FÜR ROTTÖNE ---
 def get_red_palette_color():
     red_colors = [
         "#FF0000", "#DC143C", "#FF4500", "#FF6347", "#FF7F50", 
-        "#E32636", "#C41E3A", "#8B0000", "#B22222", "#FFC0CB",
+        "#E32636", "#C41E3A", "#8B0000", "#B22222", "#FF1493",
         "#FA8072", "#FF8C00", "#FFD700"
     ]
     return random.choice(red_colors)
@@ -91,7 +91,7 @@ def verarbeite_strasse(strasse):
             else:
                 gdf_f = gdf
 
-            if not gdf_f.empty:
+            if not gdf.empty:
                 ortsteil = "Unbekannter_Ort"
                 centroid = gdf_f.geometry.centroid.iloc[0]
                 location = reverse((centroid.y, centroid.x), language='de')
@@ -115,7 +115,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V5.1 (Rot-Töne)**")
+    st.markdown("Automatisierte Sortierung — **V5.2 (Confetti Edition)**")
 
 st.divider()
 
@@ -171,7 +171,7 @@ if st.session_state.run_processing and strassen_liste:
     if ort_sammlung and not st.session_state.stop_requested:
         m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
         
-        # Zuweisung von festen Farben für jeden Ortsteil aus der Palette
+        # Zuweisung von festen Farben für jeden Ortsteil
         ort_color_map = {}
         for ort in sorted(ort_sammlung.keys()):
             ort_color_map[ort] = get_red_palette_color()
@@ -202,6 +202,8 @@ if st.session_state.run_processing and strassen_liste:
             b = combined.total_bounds 
             m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
+        # --- NEU: VISUELLER EFFEKT ---
+        st.balloons() # Das ist der Streamlit-Konfetti Effekt!
         st.success(f"✅ Fertig! {len(ort_sammlung)} Ortsteile/Ebenen erkannt.")
         
         # --- DIREKTE ANZEIGE ---
