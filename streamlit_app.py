@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-037" 
+SERIAL_NUMBER = "SN-038" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -81,6 +81,7 @@ if 'stop_requested' not in st.session_state: st.session_state.stop_requested = F
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
 if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
 if 'show_markers' not in st.session_state: st.session_state.show_markers = False
+if 'suggestion_map' not in st.session_state: st.session_state.suggestion_map = {}
 
 # Hintergrundfarbe & Style
 st.markdown("""
@@ -97,6 +98,7 @@ def verarbeite_strasse(strasse_input):
     # --- PAUSE ---
     time.sleep(random.uniform(0.3, 0.7))
     
+    # NEU: Extrahiere Name und Hausnummer aus dem Speicherformat "Name | HNR"
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
         strasse_name = parts[0].strip()
@@ -105,18 +107,18 @@ def verarbeite_strasse(strasse_input):
         strasse_name = strasse_input.strip()
         hnr = None
 
-    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_name).strip()
-    query = f"{s_clean}, Marburg-Biedenkopf"
+    # Suche nach der Straße
+    query = f"{strasse_name}, Marburg-Biedenkopf"
     
     try:
-        # 1. Finde die Geometrie der Straße (DIST ANZ PASSENDE FILTERUNG ERHÖHT)
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=50) # Distanz erhöht
+        # 1. Finde die Geometrie der Straße
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=100) # Distanz hoch
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
 
-        # 2. Filtere auf den exakten Namen (TOLEANTERER FILTER)
-        gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
+        # 2. Filtere auf den exakten Namen (Case Insensitive)
+        gdf = gdf[gdf['name'].str.contains(re.escape(strasse_name), case=False, na=False)]
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
@@ -124,15 +126,16 @@ def verarbeite_strasse(strasse_input):
         # --- PRÄZISERE MARKER-LOGIK (NUR BEI HNR) ---
         marker_coords = None
         if hnr:
-            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=10)
+            # Suche genau nach der Adresse für den Marker
+            loc = geolocator.geocode(f"{strasse_name} {hnr}, Marburg-Biedenkopf", timeout=10)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
 
         # 3. Ortsteil bestimmen
         gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
         
-        # Kompletten Namen nehmen
-        osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
+        # OSM Name als Referenz
+        osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else strasse_name
         
         ortsteil = "Unbekannt"
         if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
@@ -174,40 +177,42 @@ with st.sidebar:
     with col_s2: query_hnr = st.text_input("Nr.:", placeholder="12a")
     
     combined_query = f"{query_street} {query_hnr}".strip()
-    selected_suggestion = None
+    
+    # Suggestion Handling
     if len(query_street) > 2:
         with st.spinner("Prüfe Adresse..."):
             try:
                 results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
                 if results:
-                    st.session_state.online_suggestions = [r.address for r in results]
-                    selected_suggestion = st.selectbox("Gefundene Adressen:", st.session_state.online_suggestions)
+                    # Map suggestion string to full result object
+                    st.session_state.suggestion_map = {r.address: r for r in results}
+                    selected_address = st.selectbox("Gefundene Adressen:", list(st.session_state.suggestion_map.keys()))
                 else:
                     st.write("Keine Übereinstimmung.")
+                    st.session_state.suggestion_map = {}
+                    selected_address = None
             except Exception as e:
                 st.error(f"Fehler: {e}")
+                selected_address = None
+    else:
+        selected_address = None
 
     if st.button("➕ Straße hinzufügen", use_container_width=True):
-        if selected_suggestion:
-            full_address = selected_suggestion.split(',')[0].strip()
+        if selected_address and selected_address in st.session_state.suggestion_map:
+            res = st.session_state.suggestion_map[selected_address]
             
-            match_start = re.match(r'^(\d+\w*)\s+(.*)', full_address)
-            match_end = re.match(r'^(.*?)\s+(\d+\w*)$', full_address)
-
-            if match_start:
-                hnr_found = match_start.group(1)
-                street_found = match_start.group(2)
-            elif match_end:
-                street_found = match_end.group(1)
-                hnr_found = match_end.group(2)
-            else:
-                street_found = full_address
-                hnr_found = ""
-
+            # --- PARSE NAME AND HNR DIRECTLY FROM NOMINATIM IF POSSIBLE ---
+            # Nominatim separates this relatively well in the 'raw' data
+            raw = res.raw.get('address', {})
+            street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or res.address.split(',')[0]
+            hnr_found = raw.get('house_number', "")
+            
             street_to_save = f"{street_found} | {hnr_found}".strip(" |")
+            
             if street_to_save not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
+                st.success(f"Hinzugefügt: {street_to_save}")
                 st.rerun()
 
     st.divider()
