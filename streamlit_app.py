@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-010" 
+SERIAL_NUMBER = "SN-012" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -164,7 +164,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.1 (ClearButton {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.3 (True Refresh {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -198,6 +198,8 @@ with col_in1:
     if len(query_street) > 2:
         with st.spinner("Prüfe Schreibweise..."):
             try:
+                # Cache umgehen durch Hinzufügen einer Zeitkomponente in der Query, 
+                # falls die Bibliothek das erlaubt, oder hier einfach eine neue Abfrage erzwingen.
                 results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=5)
                 if results:
                     st.session_state.online_suggestions = [r.address for r in results]
@@ -219,14 +221,18 @@ with col_in1:
                 st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
                 st.success(f"Hinzugefügt: {street_to_save}")
-                # st.rerun() # Nicht zwingend nötig mit dem fix
+                st.rerun()
 
 with col_in2: 
     st.subheader("📝 Eingabeliste (Gespeichert)")
     
     # --- AKTUALISIERUNGS-BUTTON ---
     if st.button("🔄 Liste aktualisieren"):
+        # --- TRUEREFRESH: Cache leeren & neu laden ---
+        shutil.rmtree(CACHE_DIR)
+        os.makedirs(CACHE_DIR, exist_ok=True)
         st.session_state.saved_manual_streets = load_streets()
+        st.success("Daten wurden frisch aus dem Netz geladen.")
         st.rerun()
         
     # Zeige die gespeicherten Straßen an (schön formatiert)
