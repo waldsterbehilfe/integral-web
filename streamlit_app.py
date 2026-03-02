@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
+# Hintergrundbild-URL wird nicht mehr genutzt
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
 # Cache & Verzeichnisse
@@ -23,7 +23,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v60_precision")
+geolocator = Nominatim(user_agent="integral_pro_v61_no_bg")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -35,7 +35,7 @@ if 'manual_text' not in st.session_state: st.session_state.manual_text = ""
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
-    bg_toggle = st.checkbox("Hintergrundbild", value=True)
+    # Hintergrundbild-Checkbox entfernt
     st.divider()
     selected_colors = {}
     if st.session_state.ort_sammlung:
@@ -48,8 +48,8 @@ with st.sidebar:
         os.makedirs(CACHE_DIR, exist_ok=True)
         st.rerun()
 
-if bg_toggle:
-    st.markdown(f"<style>.stApp {{background-image: url('{GITHUB_BG_URL}'); background-size: cover; background-attachment: fixed; background-color: #0E1117;}}</style>", unsafe_allow_html=True)
+# Hintergrund-CSS entfernt, nur noch Basis-Farbe
+st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
 # --- PRÄZISIONS-FUNKTION ---
 def verarbeite_strasse(strasse):
@@ -58,10 +58,10 @@ def verarbeite_strasse(strasse):
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # 1. VERSUCH: Exakte Suche nach Name (Verhindert das Markieren von Nachbarstraßen)
+        # 1. VERSUCH: Exakte Suche nach Name
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
-        # Filter: Nur Straßen, die den Namen enthalten (Regex gegen Beifang)
+        # Filter: Nur Straßen, die den Namen enthalten
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
@@ -98,7 +98,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.0 (Precision Edition)**")
+    st.markdown("Automatisierte Sortierung — **V6.1**")
 
 st.divider()
 col_in1, col_in2 = st.columns(2)
