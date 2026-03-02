@@ -26,8 +26,9 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-# Session State initialisieren
+# Session State Initialisierung
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
+if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
@@ -37,12 +38,10 @@ with st.sidebar:
     bg_toggle = st.checkbox("Hintergrundbild", value=True)
     st.divider()
     
-    # NEU: Farbwahl für Ebenen
     st.subheader("Ebenen-Farben")
     selected_colors = {}
     if st.session_state.ort_sammlung:
         for ort in sorted(st.session_state.ort_sammlung.keys()):
-            # Standardmäßig Rot (#FF0000)
             selected_colors[ort] = st.color_picker(f"Farbe für {ort}", "#FF0000", key=f"cp_{ort}")
     else:
         st.info("Farben erscheinen nach der Analyse.")
@@ -64,7 +63,7 @@ if bg_toggle:
 else:
     st.markdown("<style>.stApp {background-image: none; background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-# --- VERARBEITUNG FUNKTION ---
+# --- FUNKTIONEN ---
 def verarbeite_strasse(strasse):
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
@@ -97,7 +96,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V5.4 (Color Picker)**")
+    st.markdown("Automatisierte Sortierung — **V5.5 (Fix Edition)**")
 
 st.divider()
 
@@ -119,41 +118,57 @@ col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
     st.session_state.stop_requested = False
+    st.session_state.ort_sammlung = None # Reset für neuen Durchlauf
+    st.session_state.fehler_liste = []
 
 if col_btn2.button("🛑 Abbruch", type="secondary"):
     st.session_state.stop_requested = True
 
 # --- 4. VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
-    ort_sammlung = defaultdict(list)
-    fehler_liste = []
+    temp_ort_sammlung = defaultdict(list)
+    temp_fehler_liste = []
+    
     prog_bar = st.progress(0)
     status_text = st.empty()
     
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
-            if st.session_state.stop_requested: break
+            if st.session_state.stop_requested:
+                break
             res = future.result()
             if res["success"]:
-                ort_sammlung[res["ort"]].append(res)
+                temp_ort_sammlung[res["ort"]].append(res)
             else:
-                fehler_liste.append(res["original"])
+                temp_fehler_liste.append(res["original"])
+            
             prog_bar.progress((i + 1) / len(strassen_liste))
-            status_text.text(f"🔍 {res.get('name', res.get('original'))}")
+            status_text.text(f"🔍 Verarbeite: {res.get('name', res.get('original'))}")
 
-    st.session_state.ort_sammlung = dict(ort_sammlung)
+    # Speichern in Session State
+    st.session_state.ort_sammlung = dict(temp_ort_sammlung)
+    st.session_state.fehler_liste = temp_fehler_liste
     st.session_state.run_processing = False
-    st.balloons()
-    st.rerun() # Seite neu laden, um Farbwähler anzuzeigen
+    
+    if not st.session_state.stop_requested:
+        st.balloons()
+    st.rerun()
 
-# --- 5. KARTE RENDERN ---
+# --- 5. ERGEBNIS-ANZEIGE ---
 if st.session_state.ort_sammlung:
+    st.success(f"✅ Analyse abgeschlossen. {len(st.session_state.ort_sammlung)} Ortsteile gefunden.")
+    
+    # Fehleranzeige
+    if st.session_state.fehler_liste:
+        with st.expander("⚠️ Nicht gefundene Straßen"):
+            st.write(", ".join(st.session_state.fehler_liste))
+
+    # Karte rendern
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
     all_geoms = []
 
     for ort, items in st.session_state.ort_sammlung.items():
-        # Farbe aus der Sidebar nutzen (oder Standard Rot)
         color = selected_colors.get(ort, "#FF0000")
         fg = folium.FeatureGroup(name=f"📍 {ort} ({len(items)} Str.)")
         
@@ -174,7 +189,7 @@ if st.session_state.ort_sammlung:
         b = combined.total_bounds 
         m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
-    st.subheader("Ergebnis-Karte")
+    st.subheader("Interaktive Karte")
     html_string = m._repr_html_()
     components.html(html_string, height=600)
     st.download_button(label="📥 Karte speichern", data=html_string, file_name="Karte.html", mime="text/html")
