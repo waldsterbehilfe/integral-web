@@ -25,7 +25,7 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent="integral_pro_v73_hardfix")
+geolocator = Nominatim(user_agent="integral_pro_v74_robust")
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -133,7 +133,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V7.3 (Button Hardfix)**")
+    st.markdown("Automatisierte Sortierung — **V7.4 (Robust Input)**")
 
 st.divider()
 
@@ -156,7 +156,7 @@ with col_in1:
     
     st.subheader("🔍 Straßensuche (Lokal)")
     
-    # HIER IST DIE STABILISIERUNG DURCH EIN FORM
+    # Formular zur Stabilisierung
     with st.form("manual_add_form"):
         query_input = st.text_input("Name der Straße:", placeholder="Straße eingeben...")
         
