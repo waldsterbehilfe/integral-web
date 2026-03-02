@@ -25,7 +25,7 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent="integral_pro_v72_fix")
+geolocator = Nominatim(user_agent="integral_pro_v73_hardfix")
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -43,7 +43,6 @@ if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-if 'search_results' not in st.session_state: st.session_state.search_results = []
 if 'uploaded_streets' not in st.session_state: st.session_state.uploaded_streets = []
 # Lade gespeicherte Straßen beim Start
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
@@ -134,7 +133,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V7.2 (Button Fix)**")
+    st.markdown("Automatisierte Sortierung — **V7.3 (Button Hardfix)**")
 
 st.divider()
 
@@ -157,23 +156,28 @@ with col_in1:
     
     st.subheader("🔍 Straßensuche (Lokal)")
     
-    def local_search_callback():
-        query = st.session_state.search_input
-        if len(query) > 0:
-            st.session_state.search_results = [s for s in known_streets if query.lower() in s.lower()]
+    # HIER IST DIE STABILISIERUNG DURCH EIN FORM
+    with st.form("manual_add_form"):
+        query_input = st.text_input("Name der Straße:", placeholder="Straße eingeben...")
+        
+        # Lokale Suche basierend auf Bekannten
+        if query_input:
+            search_results = [s for s in known_streets if query_input.lower() in s.lower()]
+            if search_results:
+                selected_suggestion = st.selectbox("Vorschlag:", search_results)
+            else:
+                selected_suggestion = None
+                st.write("Keine Übereinstimmung in bekannten Straßen.")
         else:
-            st.session_state.search_results = []
-
-    st.text_input("Straße", placeholder="Name eingeben...", key="search_input", on_change=local_search_callback, label_visibility="collapsed")
-    
-    if st.session_state.search_results:
-        selected_suggestion = st.selectbox("Auswahl aus Bekannten:", st.session_state.search_results)
-        # BUTTON FIX: Hier war der Fehler
-        if st.button("➕ Hinzufügen"):
+            selected_suggestion = None
+        
+        submit_btn = st.form_submit_button("➕ Zur Liste hinzufügen")
+        
+        if submit_btn and selected_suggestion:
             if selected_suggestion not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(selected_suggestion)
                 save_streets(st.session_state.saved_manual_streets)
-                st.session_state.search_results = []
+                st.success(f"Hinzugefügt: {selected_suggestion}")
                 st.rerun()
 
 with col_in2: 
