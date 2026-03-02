@@ -13,28 +13,17 @@ from geopy.extra.rate_limiter import RateLimiter
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Hier ist dein Hintergrundbild verknüpft
+# Hintergrundbild Link
 GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
 
-def local_css():
-    st.markdown(f"""
-    <style>
-        .stApp[data-theme="dark"] {{
-            background-image: url('{GITHUB_BG_URL}');
-            background-size: cover;
-            background-attachment: fixed;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
+# --- THEME SWITCHER UI (in der Sidebar) ---
+with st.sidebar:
+    st.title("Einstellungen")
+    theme = st.radio("Modus", ["Dunkel", "Hell"], index=0, horizontal=True) # Default Dunkel
+    bg_toggle = st.checkbox("Hintergrundbild", value=True)
+    st.divider()
 
-local_css()
-
-# --- THEME SWITCHER UI ---
-col_theme1, col_theme2, _ = st.columns([1, 1, 8])
-theme = col_theme1.radio("Modus", ["Hell", "Dunkel"], horizontal=True)
-bg_toggle = col_theme2.checkbox("Hintergrundbild", value=True)
-
-# Hintergrundbild Logik
+# Hintergrundbild Logik via CSS (verbessert)
 if bg_toggle and theme == "Dunkel":
     st.markdown(f"""
         <style>
@@ -46,15 +35,27 @@ if bg_toggle and theme == "Dunkel":
         </style>
     """, unsafe_allow_html=True)
 else:
+    # Setzt Hintergrund zurück auf Standard
     st.markdown("""
         <style>
             .stApp {
                 background-image: none;
+                background-color: #0E1117; /* Dunkler Standardwert für CSS */
             }
         </style>
     """, unsafe_allow_html=True)
+    
+    # Force Light Mode if selected
+    if theme == "Hell":
+        st.markdown("""
+            <style>
+                .stApp {
+                    background-color: white;
+                }
+            </style>
+        """, unsafe_allow_html=True)
 
-# --- 2. LOGIK ---
+# --- 2. LOGIK (Bleibt gleich) ---
 geolocator = Nominatim(user_agent="integral_pro_app")
 reverse = RateLimiter(geolocator.reverse, min_delay_seconds=1)
 
@@ -108,7 +109,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V4.5 (Custom BG)**")
+    st.markdown("Automatisierte Sortierung — **V4.6**")
 
 st.divider()
 
@@ -126,7 +127,7 @@ if manual_input:
     strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
-# Steuerungs-Buttons
+# Buttons
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
