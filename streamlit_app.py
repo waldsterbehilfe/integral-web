@@ -22,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v63_turbo")
+geolocator = Nominatim(user_agent="integral_pro_v64_hnr")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -49,31 +49,46 @@ with st.sidebar:
 # Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-# --- TURBO-FUNKTION ---
+# --- FUNKTION (MIT HAUSNUMMERN-SUPPORT) ---
 def verarbeite_strasse(strasse):
     if not strasse: return {"success": False}
-    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
+    
+    # Hausnummer-Erkennung
+    hnr = None
+    hnr_match = re.search(r'\s(\d+[a-zA-Z]?)', strasse)
+    if hnr_match:
+        hnr = hnr_match.group(1)
+        strasse_name = strasse.replace(hnr_match.group(0), '').strip()
+    else:
+        strasse_name = strasse.strip()
+
+    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_name).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # Exakte Suche (Caching erledigt hier die Hauptarbeit)
+        # Exakte Suche der Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
-        
-        # Filter
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
+
+        # --- Hausnummer Marker Suche ---
+        marker_coords = None
+        if hnr and not gdf.empty:
+            # Suche nach der spezifischen Adresse in der Nähe der gefundenen Straße
+            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
+            if loc:
+                marker_coords = (loc.latitude, loc.longitude)
 
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
             osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
             
-            # --- Turbo Ortsteil Bestimmung ---
+            # Turbo Ortsteil Bestimmung
             ortsteil = "Unbekannt"
-            # Versuche den Ortsteil aus den OSM-Tags zu lesen (schneller als Reverse Geocoding)
             if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
             elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
             
-            # Fallback falls Tag fehlt (nur 1 API Aufruf statt 2 pro Straße)
+            # Fallback falls Tag fehlt
             if ortsteil == "Unbekannt":
                 try:
                     centroid = gdf.geometry.unary_union.centroid
@@ -83,7 +98,14 @@ def verarbeite_strasse(strasse):
                         ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
                 except: pass
             
-            return {"gdf": gdf, "ort": ortsteil, "name": osm_name, "original": strasse, "success": True}
+            return {
+                "gdf": gdf, 
+                "ort": ortsteil, 
+                "name": osm_name, 
+                "original": strasse, 
+                "marker": marker_coords, 
+                "success": True
+            }
     except:
         pass
     return {"success": False, "original": strasse}
@@ -93,7 +115,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.3 (Turbo)**")
+    st.markdown("Automatisierte Sortierung — **V6.4 (House Number Support)**")
 
 st.divider()
 col_in1, col_in2 = st.columns(2)
@@ -130,7 +152,6 @@ if st.session_state.run_processing and strassen_liste:
     st_text = st.empty()
     total = len(strassen_liste)
     
-    # max_workers höher, da wir weniger API-Limitierungen durch Reverse Geocoding haben
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
@@ -158,6 +179,10 @@ if st.session_state.ort_sammlung:
 
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
+    
+    # FeatureGroup für Marker erstellen
+    marker_fg = folium.FeatureGroup(name="📍 Hausnummern-Marker")
+
     for ort, items in st.session_state.ort_sammlung.items():
         color = selected_colors.get(ort, "#FF0000")
         fg = folium.FeatureGroup(name=f"📍 {ort} ({len(items)} Str.)")
@@ -166,9 +191,20 @@ if st.session_state.ort_sammlung:
             folium.GeoJson(item["gdf"].__geo_interface__,
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
                            tooltip=f"Gefunden: {item['name']}").add_to(fg)
+            
+            # --- Marker hinzufügen ---
+            if item.get("marker"):
+                folium.Marker(
+                    location=item["marker"],
+                    popup=f"Hausnummer: {item['original']}",
+                    icon=folium.Icon(color="blue", icon="info-sign")
+                ).add_to(marker_fg)
+                
         fg.add_to(m)
     
+    marker_fg.add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
+    
     if all_geoms:
         combined = gpd.GeoDataFrame(pd.concat(all_geoms))
         b = combined.total_bounds
