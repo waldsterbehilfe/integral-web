@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-030" 
+SERIAL_NUMBER = "SN-031" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -157,13 +157,14 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=80)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Straßensortierung — **V9.21 (LayoutUpdate {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Straßensortierung — **V9.22 (SplitLayout {SERIAL_NUMBER})**")
 
 st.divider()
 
-# Layout: 2 Spalten (Eingabe links, Karte rechts)
+# --- HAUPTLAYOUT: NEBENEINANDER ---
 col_left, col_right = st.columns([1, 2])
 
+# --- LINKE SPALTE: EINGABE & EINSTELLUNGEN ---
 with col_left:
     st.subheader("📥 Dateneingabe")
     
@@ -248,8 +249,11 @@ with col_left:
         st.session_state.stop_requested, st.session_state.run_processing = False, False
         st.rerun()
 
+# --- RECHTE SPALTE: KARTE & ERGEBNISSE ---
 with col_right:
-    # 4. VERARBEITUNG & 5. ANZEIGE
+    st.subheader("🗺️ Karte & Ergebnisse")
+    
+    # 4. VERARBEITUNG
     if st.session_state.run_processing:
         strassen_liste = [s for s in st.session_state.saved_manual_streets if s]
         temp_ort, temp_err = defaultdict(list), []
@@ -271,8 +275,8 @@ with col_right:
         st.session_state.run_processing = False
         st.rerun()
 
+    # 5. ANZEIGE
     if st.session_state.ort_sammlung:
-        st.subheader("🗺️ Karte")
         if st.session_state.fehler_liste:
             with st.expander("⚠️ Nicht gefunden"): st.write(", ".join(st.session_state.fehler_liste))
 
