@@ -22,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v64_hnr")
+geolocator = Nominatim(user_agent="integral_pro_v65_input")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -66,15 +66,12 @@ def verarbeite_strasse(strasse):
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # Exakte Suche der Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
-        # --- Hausnummer Marker Suche ---
         marker_coords = None
         if hnr and not gdf.empty:
-            # Suche nach der spezifischen Adresse in der Nähe der gefundenen Straße
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
@@ -83,12 +80,10 @@ def verarbeite_strasse(strasse):
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
             osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
             
-            # Turbo Ortsteil Bestimmung
             ortsteil = "Unbekannt"
             if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
             elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
             
-            # Fallback falls Tag fehlt
             if ortsteil == "Unbekannt":
                 try:
                     centroid = gdf.geometry.unary_union.centroid
@@ -115,16 +110,37 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.4 (House Number Support)**")
+    st.markdown("Automatisierte Sortierung — **V6.5 (Intelligent Input)**")
 
 st.divider()
+
+# --- NEUE EINGABE-LOGIK ---
 col_in1, col_in2 = st.columns(2)
-with col_in1: files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
+with col_in1: 
+    files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
+    
+    # Live-Input mit Vervollständigung
+    st.subheader("🔍 Straßensuche")
+    query_input = st.text_input("Suche", placeholder="Straße oder Ort eingeben...", label_visibility="collapsed")
+    
+    if query_input and len(query_input) > 3:
+        try:
+            # Schnelle API-Abfrage für Vorschläge
+            results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=3)
+            if results:
+                suggestion = st.selectbox("Vorschläge:", [r.address.split(',')[0] for r in results])
+                if st.button("➕ Hinzufügen"):
+                    if suggestion not in st.session_state.manual_text:
+                        st.session_state.manual_text += f"{suggestion}\n"
+                        st.rerun()
+        except: pass
+
 with col_in2: 
-    manual_input_val = st.text_area("Manuelle Eingabe", 
+    st.subheader("📝 Eingabeliste")
+    manual_input_val = st.text_area("Straßenliste", 
                                     value=st.session_state.manual_text,
-                                    placeholder="Straßen untereinander...", 
-                                    height=126)
+                                    height=200,
+                                    disabled=True) # Read-Only
 
 strassen_liste = []
 if files:
@@ -136,7 +152,7 @@ strassen_liste = list(dict.fromkeys(strassen_liste))
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 
 if col_btn1.button("🚀 Analyse starten", type="primary"):
-    st.session_state.manual_text = manual_input_val 
+    # manual_text wird aus session_state genutzt
     st.session_state.run_processing, st.session_state.stop_requested = True, False
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
@@ -180,7 +196,6 @@ if st.session_state.ort_sammlung:
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
     
-    # FeatureGroup für Marker erstellen
     marker_fg = folium.FeatureGroup(name="📍 Hausnummern-Marker")
 
     for ort, items in st.session_state.ort_sammlung.items():
@@ -192,7 +207,6 @@ if st.session_state.ort_sammlung:
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
                            tooltip=f"Gefunden: {item['name']}").add_to(fg)
             
-            # --- Marker hinzufügen ---
             if item.get("marker"):
                 folium.Marker(
                     location=item["marker"],
