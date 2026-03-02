@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-002" 
+SERIAL_NUMBER = "SN-005" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -40,6 +40,27 @@ def load_streets():
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
             return [line.strip() for line in f.readlines() if line.strip()]
     return []
+
+# --- HILFSFUNKTION FÜR EXCEL-EXPORT ---
+def create_excel_download(ort_sammlung):
+    data = []
+    for ort, items in ort_sammlung.items():
+        for item in items:
+            data.append({
+                "Ortsteil": ort,
+                "Originaleingabe": item["original"],
+                "Gefundener Straßenname": item["name"],
+                "Zentrum Lat": item["gdf"].geometry.unary_union.centroid.y,
+                "Zentrum Lon": item["gdf"].geometry.unary_union.centroid.x,
+                "Marker Lat": item["marker"][0] if item["marker"] else None,
+                "Marker Lon": item["marker"][1] if item["marker"] else None
+            })
+    df = pd.DataFrame(data)
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Analyseergebnisse')
+    return output.getvalue()
 
 # Session State - Initialisierung
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -84,7 +105,8 @@ def verarbeite_strasse(strasse):
     
     # Hausnummer-Erkennung
     hnr = None
-    hnr_match = re.search(r'\s(\d+[a-zA-Z]?)', strasse)
+    # Sucht nach einer Zahl am Ende, optional mit Buchstabe (z.B. "12a")
+    hnr_match = re.search(r'(\d+[a-zA-Z]?)$', strasse.strip())
     if hnr_match:
         hnr = hnr_match.group(1)
         strasse_name = strasse.replace(hnr_match.group(0), '').strip()
@@ -101,6 +123,7 @@ def verarbeite_strasse(strasse):
 
         marker_coords = None
         if hnr and not gdf.empty:
+            # Versuche präzise Hausnummer zu finden
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
@@ -122,11 +145,12 @@ def verarbeite_strasse(strasse):
                         ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
                 except: pass
             
+            # Speicher den Originalnamen inkl. Hausnummer
             return {
                 "gdf": gdf, 
                 "ort": ortsteil, 
                 "name": osm_name, 
-                "original": strasse, 
+                "original": strasse, # Das ist wichtig für die Excel-Tabelle
                 "marker": marker_coords, 
                 "success": True
             }
@@ -139,7 +163,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V7.7 (Serialized {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V7.10 (FormFix {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -158,30 +182,28 @@ with col_in1:
     
     st.subheader("🔍 Straßensuche (Online-Prüfung)")
     
-    # Formular zur Stabilisierung
+    # --- TEXTINPUT AUSSERHALB DES FORMS ---
+    query_input = st.text_input("Name der Straße + Hausnummer:", placeholder="z.B. 'Am Markt 12'...")
+    
+    # ONLINE-VALIDIERUNG (Echtzeit)
+    selected_suggestion = None
+    if query_input and len(query_input) > 2:
+        with st.spinner("Prüfe Schreibweise..."):
+            try:
+                # Suche nach ähnlichen Namen im Landkreis
+                results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
+                if results:
+                    # Extrahiere nur den Straßennamen
+                    st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
+                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
+                else:
+                    st.write("Keine Übereinstimmung im Internet gefunden.")
+            except:
+                st.write("Fehler bei der Online-Prüfung.")
+
+    # --- NUR DER SUBMIT-BUTTON IM FORM ---
     with st.form("manual_add_form"):
-        query_input = st.text_input("Name der Straße:", placeholder="Straße eingeben (z.B. 'Am Markt')...")
-        
-        # ONLINE-VALIDIERUNG
-        if query_input and len(query_input) > 2:
-            with st.spinner("Prüfe Schreibweise..."):
-                try:
-                    # Suche nach ähnlichen Namen im Landkreis
-                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
-                    if results:
-                        # Extrahiere nur den Straßennamen
-                        st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
-                        selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
-                    else:
-                        selected_suggestion = None
-                        st.write("Keine Übereinstimmung im Internet gefunden.")
-                except:
-                    selected_suggestion = None
-                    st.write("Fehler bei der Online-Prüfung.")
-        else:
-            selected_suggestion = None
-        
-        submit_btn = st.form_submit_button("➕ Korrekte Straße hinzufügen")
+        submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
             if selected_suggestion not in st.session_state.saved_manual_streets:
@@ -204,7 +226,7 @@ with col_in2:
 strassen_liste = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
 strassen_liste = [s for s in strassen_liste if s]
 
-col_btn1, col_btn2, _ = st.columns([1, 1, 3])
+col_btn1, col_btn2, col_excel = st.columns([1, 1, 2])
 
 if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing, st.session_state.stop_requested = True, False
@@ -278,4 +300,15 @@ if st.session_state.ort_sammlung:
         m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
     components.html(m._repr_html_(), height=700)
-    st.download_button("📥 Karte speichern", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
+    
+    # EXCEL DOWNLOAD BUTTON
+    excel_data = create_excel_download(st.session_state.ort_sammlung)
+    col_excel.download_button(
+        "📥 Analyse als Excel exportieren",
+        excel_data,
+        file_name=f"Analyse_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    
+    st.download_button("📥 Karte speichern (HTML)", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
