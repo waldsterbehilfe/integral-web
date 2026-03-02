@@ -1,7 +1,7 @@
 import streamlit as st
 import osmnx as ox
 import folium
-from streamlit_folium import st_folium # Nutzung deiner requirements.txt
+from streamlit_folium import st_folium
 import io, zipfile, os, re
 import pandas as pd
 from collections import defaultdict
@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Cache für OSMNX (Persistent für Performance)
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -70,7 +69,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Parallelisiert & Zentralisiert**")
+    st.markdown("Automatisierte Sortierung — **Turbo mit Fortschritt**")
 
 st.divider()
 
@@ -79,7 +78,7 @@ col_in1, col_in2 = st.columns(2)
 with col_in1:
     uploaded_files = st.file_uploader("Dateien laden (.txt)", type=["txt"], accept_multiple_files=True)
 with col_in2:
-    manual_input = st.text_area("Manuelle Eingabe", placeholder="z.B. Schweinsberger Str (Tippfehler werden korrigiert)", height=126)
+    manual_input = st.text_area("Manuelle Eingabe", placeholder="z.B. Schweinsberger Str", height=126)
 
 strassen_liste = []
 if uploaded_files:
@@ -92,20 +91,34 @@ strassen_liste = list(dict.fromkeys(strassen_liste))
 if st.button("🚀 Turbo-Analyse starten", type="primary"):
     st.session_state.run_processing = True
 
-# --- VERARBEITUNG ---
+# --- VERARBEITUNG (Turbo-Modus mit Fortschritt) ---
 if st.session_state.run_processing and strassen_liste:
     ort_sammlung = defaultdict(list)
     fehler_liste = []
     korrekturen_log = []
     
-    status = st.empty()
-    status.text(f"🚀 Starte parallele Suche für {len(strassen_liste)} Straßen...")
+    # NEU: Fortschrittsanzeige
+    prog_bar = st.progress(0)
+    status_text = st.empty()
     
-    # NEU: Multi-Threading
+    # Multi-Threading mit Fortschritts-Updates
     results = []
+    total = len(strassen_liste)
+    
     with ThreadPoolExecutor(max_workers=5) as executor:
-        results = list(executor.map(verarbeite_strasse, strassen_liste))
+        # Hier nutzen wir map, um Ergebnisse zu sammeln
+        futures = [executor.submit(verarbeite_strasse, strasse) for strasse in strassen_liste]
         
+        for i, future in enumerate(futures):
+            res = future.result()
+            results.append(res)
+            
+            # Update Fortschritts-UI
+            progress_pct = (i + 1) / total
+            prog_bar.progress(progress_pct)
+            status_text.text(f"🔍 Analysiere: {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
+
+    # --- AUSGABE ---
     for res in results:
         if res["success"]:
             ort_sammlung[res["ort"]].append(res)
@@ -114,25 +127,18 @@ if st.session_state.run_processing and strassen_liste:
         else:
             fehler_liste.append(res["original"])
 
-    # --- AUSGABE & MASTER-KARTE ---
     if ort_sammlung:
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            
-            # Master-Karte erstellen
             master_map = folium.Map(location=[50.8, 8.8], zoom_start=11)
             
             for ort in sorted(ort_sammlung.keys()):
-                # Für die Master-Karte: Jedes Dorf bekommt eine eigene FeatureGroup (Layer)
                 feature_group = folium.FeatureGroup(name=ort)
-                
                 geoms = [it["gdf"] for it in ort_sammlung[ort]]
                 for it in ort_sammlung[ort]:
                     folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(feature_group)
-                
                 feature_group.add_to(master_map)
                 
-                # Einzelkarten für die ZIP
                 m = folium.Map()
                 for it in ort_sammlung[ort]:
                     folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(m)
@@ -141,7 +147,6 @@ if st.session_state.run_processing and strassen_liste:
                 m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.1, 0.1))
                 zip_file.writestr(f"Karte_{ort}.html", m._repr_html_())
             
-            # Master-Karte Layer Control hinzufügen & in ZIP packen
             folium.LayerControl().add_to(master_map)
             zip_file.writestr(f"00_MASTER_UEBERSICHT.html", master_map._repr_html_())
         
