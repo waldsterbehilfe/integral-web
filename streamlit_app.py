@@ -22,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v62_status")
+geolocator = Nominatim(user_agent="integral_pro_v63_turbo")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -49,37 +49,39 @@ with st.sidebar:
 # Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-# --- PRÄZISIONS-FUNKTION ---
+# --- TURBO-FUNKTION ---
 def verarbeite_strasse(strasse):
     if not strasse: return {"success": False}
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
+        # Exakte Suche (Caching erledigt hier die Hauptarbeit)
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
+        # Filter
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
-        if gdf.empty:
-            loc = geolocator.geocode(query, timeout=5)
-            if loc:
-                gdf = ox.features_from_point((loc.latitude, loc.longitude), tags={"highway": True}, dist=50)
-                if not gdf.empty and 'name' in gdf.columns:
-                    gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
-
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
-            if gdf.empty: return {"success": False, "original": strasse}
-            
             osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
             
-            centroid = gdf.geometry.unary_union.centroid
-            loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=5)
+            # --- Turbo Ortsteil Bestimmung ---
             ortsteil = "Unbekannt"
-            if loc_rev and 'address' in loc_rev.raw:
-                a = loc_rev.raw['address']
-                ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
+            # Versuche den Ortsteil aus den OSM-Tags zu lesen (schneller als Reverse Geocoding)
+            if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
+            elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
+            
+            # Fallback falls Tag fehlt (nur 1 API Aufruf statt 2 pro Straße)
+            if ortsteil == "Unbekannt":
+                try:
+                    centroid = gdf.geometry.unary_union.centroid
+                    loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=3)
+                    if loc_rev and 'address' in loc_rev.raw:
+                        a = loc_rev.raw['address']
+                        ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
+                except: pass
             
             return {"gdf": gdf, "ort": ortsteil, "name": osm_name, "original": strasse, "success": True}
     except:
@@ -91,7 +93,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.2**")
+    st.markdown("Automatisierte Sortierung — **V6.3 (Turbo)**")
 
 st.divider()
 col_in1, col_in2 = st.columns(2)
@@ -128,7 +130,8 @@ if st.session_state.run_processing and strassen_liste:
     st_text = st.empty()
     total = len(strassen_liste)
     
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # max_workers höher, da wir weniger API-Limitierungen durch Reverse Geocoding haben
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
             if st.session_state.stop_requested: break
@@ -139,7 +142,6 @@ if st.session_state.run_processing and strassen_liste:
                 temp_err.append(res.get("original", "Unbekannt"))
             
             pb.progress((i + 1) / total)
-            # KORREKTUR: Status-Anzeige (X von Y)
             st_text.text(f"🔍 Prüfe: {i+1} von {total} — {res.get('name', 'Suche...')}")
 
     if not st.session_state.stop_requested:
