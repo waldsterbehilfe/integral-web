@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-024" 
+SERIAL_NUMBER = "SN-025" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -96,16 +96,19 @@ def verarbeite_strasse(strasse_input):
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # Finde Straße
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
+        # Finde Straße - DISTANZ REDUZIERT FÜR PRÄZISION
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=50)
         
-        # --- MARKER-LOGIK ---
+        # --- PRÄZISERE MARKER-LOGIK ---
         marker_coords = None
-        if hnr and not gdf.empty:
+        
+        # 1. ZUERST VERSUCHEN: Exakte Hausnummern-Koordinate
+        if hnr:
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
         
+        # 2. RÜCKFALL: Wenn keine HNR gefunden wurde, zentrum der gefundenen Straße
         if not marker_coords and not gdf.empty:
             gdf_proj = gdf.to_crs(epsg=3857)
             centroid = gdf_proj.geometry.unary_union.centroid
@@ -146,7 +149,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.15 (ProgressFix {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.16 (PreciseMarking {SERIAL_NUMBER})**")
 
 st.divider()
 
