@@ -9,9 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
+import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-012" 
+SERIAL_NUMBER = "SN-013" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -28,7 +29,8 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}")
+# Erhöhe timeout leicht
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -106,7 +108,6 @@ st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_h
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # Trennung von Straße und Hausnummer aus dem Speicherformat "Straße | Nummer"
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
         strasse_name = parts[0]
@@ -124,7 +125,6 @@ def verarbeite_strasse(strasse_input):
         
         marker_coords = None
         if hnr and not gdf.empty:
-            # Versuche präzise Hausnummer zu finden
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
@@ -146,12 +146,11 @@ def verarbeite_strasse(strasse_input):
                         ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
                 except: pass
             
-            # Speicher das kombinierte Format
             return {
                 "gdf": gdf, 
                 "ort": ortsteil, 
                 "name": osm_name, 
-                "original": strasse_input, # Format "Name | Nummer"
+                "original": strasse_input, 
                 "marker": marker_coords, 
                 "success": True
             }
@@ -164,7 +163,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.3 (True Refresh {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.4 (ErrorHandling {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -173,7 +172,6 @@ col_in1, col_in2 = st.columns(2)
 with col_in1: 
     files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
     
-    # Straßen aus Dateien auslesen
     if files:
         file_streets = []
         for f in files: file_streets.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
@@ -183,14 +181,12 @@ with col_in1:
     
     st.subheader("🔍 Straßensuche (Live-Prüfung)")
     
-    # --- GETRENTE INPUTS ---
     col_str, col_hnr = st.columns([3, 1])
     with col_str:
         query_street = st.text_input("Name der Straße:", placeholder="z.B. Am Markt")
     with col_hnr:
         query_hnr = st.text_input("Nr.:", placeholder="12a")
     
-    # Kombinierte Suche für die Validierung
     combined_query = f"{query_street} {query_hnr}".strip()
     
     # --- ONLINE-VALIDIERUNG ---
@@ -198,23 +194,20 @@ with col_in1:
     if len(query_street) > 2:
         with st.spinner("Prüfe Schreibweise..."):
             try:
-                # Cache umgehen durch Hinzufügen einer Zeitkomponente in der Query, 
-                # falls die Bibliothek das erlaubt, oder hier einfach eine neue Abfrage erzwingen.
-                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=5)
+                # Mehr Zeit für die Anfrage
+                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=10)
                 if results:
                     st.session_state.online_suggestions = [r.address for r in results]
                     selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
                 else:
                     st.write("Keine Übereinstimmung gefunden.")
-            except:
-                st.write("Fehler bei der Prüfung.")
+            except Exception as e:
+                st.error(f"Fehler bei der Online-Prüfung: Bitte prüfen Sie Ihre Verbindung oder versuchen Sie es gleich erneut. (Fehler: {e})")
 
-    # --- NUR DER SUBMIT-BUTTON IM FORM ---
     with st.form("manual_add_form", clear_on_submit=False):
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
-            # Speichere im Format "Name | Nummer"
             street_to_save = f"{selected_suggestion.split(',')[0]} | {query_hnr}".strip(" |")
             
             if street_to_save not in st.session_state.saved_manual_streets:
@@ -226,16 +219,13 @@ with col_in1:
 with col_in2: 
     st.subheader("📝 Eingabeliste (Gespeichert)")
     
-    # --- AKTUALISIERUNGS-BUTTON ---
     if st.button("🔄 Liste aktualisieren"):
-        # --- TRUEREFRESH: Cache leeren & neu laden ---
         shutil.rmtree(CACHE_DIR)
         os.makedirs(CACHE_DIR, exist_ok=True)
         st.session_state.saved_manual_streets = load_streets()
         st.success("Daten wurden frisch aus dem Netz geladen.")
         st.rerun()
         
-    # Zeige die gespeicherten Straßen an (schön formatiert)
     display_text = "\n".join(st.session_state.saved_manual_streets)
     st.text_area("Straßenliste", 
                  value=display_text,
@@ -322,7 +312,6 @@ if st.session_state.ort_sammlung:
 
     components.html(m._repr_html_(), height=700)
     
-    # EXCEL DOWNLOAD BUTTON
     excel_data = create_excel_download(st.session_state.ort_sammlung)
     col_excel.download_button(
         "📥 Analyse als Excel exportieren",
