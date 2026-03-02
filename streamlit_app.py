@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-047" 
+SERIAL_NUMBER = "SN-048" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -96,6 +96,7 @@ st.markdown("""
     .block-container {padding-top: 1rem;}
     h1 {font-size: 1.5rem !important;}
     h3 {font-size: 1.1rem !important; margin-bottom: 0.5rem;}
+    .step-box {background-color: #1E232B; padding: 10px; border-radius: 5px; border: 1px solid #31333F; margin-bottom: 10px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -173,12 +174,20 @@ with col_h2:
 
 st.markdown("---")
 
+# --- SCHRITT-FÜR-SCHRITT ANLEITUNG (NEU) ---
+if not st.session_state.ort_sammlung:
+    with st.container():
+        st.markdown("<div class='step-box'>", unsafe_allow_html=True)
+        st.subheader("💡 Anleitung")
+        st.markdown("1. Fülle die Liste mit Straßen (Suchen oder TXT-Import).<br>2. Klicke auf '💾 Speichern & Bereinigen'.<br>3. Starte die Analyse.", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
 # --- TOP CONTROL PANEL ---
 with st.container():
     c_col1, c_col2, c_col3, c_col4 = st.columns([2,2,1,1])
     
     with c_col1:
-        query_input = st.text_input("📍 Straße suchen:", placeholder="Ringstr 10")
+        query_input = st.text_input("📍 1. Straße suchen:", placeholder="Ringstr 10")
         if len(query_input) > 3:
             try:
                 results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
@@ -205,8 +214,8 @@ with st.container():
                 st.rerun()
 
     with c_col2:
-        st.write("**TXT-Import**")
-        files = st.file_uploader("Upload", type=["txt"], accept_multiple_files=True, label_visibility="collapsed")
+        st.write("**📥 2. TXT-Import**")
+        files = st.file_uploader("Datei hochladen", type=["txt"], accept_multiple_files=True, label_visibility="collapsed")
         if files:
             new_streets = []
             for f in files: 
@@ -218,17 +227,17 @@ with st.container():
             st.rerun()
 
     with c_col3:
-        st.write("**Aktionen**")
+        st.write("**🗑️ Cache**")
+        if st.button("🗑️ Cache leeren", use_container_width=True):
+            clear_all_caches()
+            st.rerun()
         if st.button("📋 Leeren", use_container_width=True):
             if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
             st.session_state.saved_manual_streets = []
             st.rerun()
-        if st.button("🗑️ Cache", use_container_width=True):
-            clear_all_caches()
-            st.rerun()
 
     with c_col4:
-        st.write("**Analyse**")
+        st.write("**🚀 Analyse**")
         if st.button("🚀 Start", type="primary", use_container_width=True):
             st.session_state.run_processing, st.session_state.stop_requested = True, False
             st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
@@ -279,7 +288,7 @@ if st.session_state.ort_sammlung:
         for ort, items in st.session_state.ort_sammlung.items():
             res_data.append({"Ortsteil": ort, "Anzahl": len(items), "Farbe": st.session_state.ort_colors.get(ort, "#FFFFFF")})
         
-        # FIX: Einfache Anzeige der Farbe als Text, falls ColorColumn nicht existiert
+        # Einfache Anzeige der Farbe
         st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True)
 
         # Downloads
@@ -322,7 +331,7 @@ if st.session_state.ort_sammlung:
 
 else:
     # --- INTERAKTIVE LISTE ---
-    st.write(f"📝 **Liste ({len(st.session_state.saved_manual_streets)})**")
+    st.write(f"📝 **3. Liste ({len(st.session_state.saved_manual_streets)})**")
     
     df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
     edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True)
