@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
+# Performance-Tuning: Cache Ordner
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -28,7 +29,7 @@ def verarbeite_strasse(strasse):
     query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        # Direkte Suche
+        # Direkte Suche - nutzt intern den Cache!
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=1000)
         
         if gdf.empty:
@@ -69,11 +70,10 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Turbo mit Fortschritt**")
+    st.markdown("Automatisierte Sortierung — **Performance Tuned**")
 
 st.divider()
 
-# Eingabe
 col_in1, col_in2 = st.columns(2)
 with col_in1:
     uploaded_files = st.file_uploader("Dateien laden (.txt)", type=["txt"], accept_multiple_files=True)
@@ -88,35 +88,33 @@ if manual_input:
     strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
-if st.button("🚀 Turbo-Analyse starten", type="primary"):
+if st.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
 
-# --- VERARBEITUNG (Turbo-Modus mit Fortschritt) ---
+# --- VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
     ort_sammlung = defaultdict(list)
     fehler_liste = []
     korrekturen_log = []
     
-    # NEU: Fortschrittsanzeige
     prog_bar = st.progress(0)
     status_text = st.empty()
     
-    # Multi-Threading mit Fortschritts-Updates
+    # NEU: Reduzierte Threads für Stabilität, aber optimierte Abfrage
     results = []
     total = len(strassen_liste)
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        # Hier nutzen wir map, um Ergebnisse zu sammeln
-        futures = [executor.submit(verarbeite_strasse, strasse) for strasse in strassen_liste]
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        # Futures nutzen, um Fortschritt zu messen
+        future_to_street = {executor.submit(verarbeite_strasse, strasse): strasse for strasse in strassen_liste}
         
-        for i, future in enumerate(futures):
+        for i, future in enumerate(future_to_street):
             res = future.result()
             results.append(res)
             
-            # Update Fortschritts-UI
-            progress_pct = (i + 1) / total
-            prog_bar.progress(progress_pct)
-            status_text.text(f"🔍 Analysiere: {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
+            # Update Fortschritt
+            prog_bar.progress((i + 1) / total)
+            status_text.text(f"🔍 {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
 
     # --- AUSGABE ---
     for res in results:
@@ -150,13 +148,13 @@ if st.session_state.run_processing and strassen_liste:
             folium.LayerControl().add_to(master_map)
             zip_file.writestr(f"00_MASTER_UEBERSICHT.html", master_map._repr_html_())
         
-        st.success(f"Turbo-Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
+        st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
         if korrekturen_log:
-            with st.expander("🛠️ Durchgeführte Auto-Korrekturen"):
+            with st.expander("🛠️ Auto-Korrekturen"):
                 for log in korrekturen_log: st.write(log)
         
         st.divider()
-        st.download_button("📥 ZIP: Alle Karten & Master-Übersicht", zip_buffer.getvalue(), f"INTEGRAL_Turbo.zip")
+        st.download_button("📥 ZIP: Alle Karten", zip_buffer.getvalue(), f"INTEGRAL_Turbo.zip")
     
     if fehler_liste:
         st.error(f"Konnte {len(fehler_liste)} Straßen nicht finden.")
