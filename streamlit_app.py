@@ -9,12 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
-import streamlit.components.v1 as components # NEU für direkte Anzeige
+import streamlit.components.v1 as components
 
 # --- 1. SETUP & THEME (Fix auf Dunkel) ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Hintergrundbild Link
+# Hintergrundbild Link (Raw)
 GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
 
 # --- THEME SWITCHER UI (Sidebar) ---
@@ -99,7 +99,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V4.8 (Interactive View)**")
+    st.markdown("Automatisierte Sortierung — **V4.9 (Stable)**")
 
 st.divider()
 
@@ -160,12 +160,18 @@ if st.session_state.run_processing and strassen_liste:
             fg = folium.FeatureGroup(name=f"📍 {ort} ({len(ort_sammlung[ort])} Str.)")
             
             for item in ort_sammlung[ort]:
-                folium.GeoJson(
-                    item["gdf"],
-                    style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                    tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
-                    popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
-                ).add_to(fg)
+                # Robustes GeoJSON Rendering
+                gdf = item["gdf"]
+                if not gdf.empty:
+                    # Umwandlung für Folium Kompatibilität
+                    geojson_data = gdf.__geo_interface__
+                    
+                    folium.GeoJson(
+                        geojson_data,
+                        style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
+                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
+                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
+                    ).add_to(fg)
             fg.add_to(m)
         
         folium.LayerControl(collapsed=False).add_to(m)
@@ -177,18 +183,21 @@ if st.session_state.run_processing and strassen_liste:
 
         st.success(f"✅ Fertig! {len(ort_sammlung)} Ortsteile/Ebenen erkannt.")
         
-        # --- NEU: DIREKTE ANZEIGE ---
+        # --- DIREKTE ANZEIGE ---
         st.subheader("Interaktive Karte")
-        html_string = m._repr_html_()
-        components.html(html_string, height=600)
-        
-        # Download-Button bleibt
-        st.download_button(
-            label="📥 Karte als HTML Datei herunterladen",
-            data=html_string,
-            file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
-            mime="text/html"
-        )
+        try:
+            html_string = m._repr_html_()
+            components.html(html_string, height=600)
+            
+            # Optionaler Download
+            st.download_button(
+                label="📥 Karte als HTML Datei herunterladen",
+                data=html_string,
+                file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
+                mime="text/html"
+            )
+        except Exception as e:
+            st.error(f"Fehler beim Rendern der Karte: {e}")
 
     if fehler_liste and not st.session_state.stop_requested:
         with st.expander("⚠️ Nicht gefundene Straßen"):
