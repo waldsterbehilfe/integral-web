@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-015" 
+SERIAL_NUMBER = "SN-016" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -166,7 +166,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.6 (429Handler {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.7 (UI Progress {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -205,7 +205,6 @@ with col_in1:
                 else:
                     st.write("Keine Übereinstimmung gefunden.")
             except Exception as e:
-                # Spezialbehandlung für 429
                 if "429" in str(e):
                     st.error("Too Many Requests: Der Server ist überlastet. Bitte warten Sie 10 Sekunden und versuchen es erneut.")
                 else:
@@ -233,12 +232,11 @@ with col_in2:
         st.success("Daten wurden frisch aus dem Netz geladen.")
         st.rerun()
         
-    display_text = "\n".join(st.session_state.saved_manual_streets)
-    st.text_area("Straßenliste", 
-                 value=display_text,
-                 height=200,
-                 disabled=True,
-                 key="display_text_area")
+    # --- VERBESSERTE LISTE ---
+    st.write(f"Anzahl: {len(st.session_state.saved_manual_streets)}")
+    # Statt Textarea, nutzen wir eine schicke Tabelle oder Liste
+    df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straße | Hausnummer"])
+    st.dataframe(df_list, use_container_width=True, height=200)
 
 # Finale Liste für die Analyse
 strassen_liste = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
@@ -275,8 +273,10 @@ if st.session_state.run_processing and strassen_liste:
                 else:
                     temp_err.append(res.get("original", "Unbekannt"))
                 
-                pb.progress((i + 1) / total)
-                st_text.text(f"🔍 Prüfe: {i+1} von {total} — {res.get('name', 'Suche...')}")
+                # --- VERBESSERTE FORTSCHRITTANZEIGE ---
+                current_progress = (i + 1) / total
+                pb.progress(current_progress)
+                st_text.text(f"🔍 Fortschritt: {i+1} von {total} — Verarbeite: {res.get('name', '...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
