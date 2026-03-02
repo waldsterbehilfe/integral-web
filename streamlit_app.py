@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-021" 
+SERIAL_NUMBER = "SN-023" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -29,8 +29,8 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-# Erhöhe timeout leicht
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
+# --- OPTIMIERUNG: Timeout für geolocator ---
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=5)
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -74,32 +74,6 @@ if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual
 # Für Vorschläge aus dem Internet
 if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("Einstellungen")
-    st.markdown(f"**Version:** `{SERIAL_NUMBER}`")
-    st.divider()
-    selected_colors = {}
-    if st.session_state.ort_sammlung:
-        st.subheader("🎨 Ebenen-Farben")
-        for ort in sorted(st.session_state.ort_sammlung.keys()):
-            selected_colors[ort] = st.color_picker(f"{ort}", "#FF0000", key=f"cp_{ort}")
-    st.divider()
-    
-    # --- CLEAR BUTTON ---
-    if st.button("📋 Liste leeren", use_container_width=True):
-        if os.path.exists(STREETS_FILE):
-            os.remove(STREETS_FILE)
-        st.session_state.saved_manual_streets = []
-        st.success("Liste geleert.")
-        st.rerun()
-
-    if st.button("🗑️ Geocache leeren", use_container_width=True):
-        shutil.rmtree(CACHE_DIR)
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        st.success("Geocache gelöscht.")
-        st.rerun()
-
 # Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
@@ -107,8 +81,8 @@ st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_h
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # Zufällige kurze Pause, um 429er Fehler zu vermeiden
-    time.sleep(random.uniform(0.1, 0.4))
+    # --- OPTIMIERUNG: Längere Pause ---
+    time.sleep(random.uniform(0.5, 1.0))
     
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
@@ -125,17 +99,14 @@ def verarbeite_strasse(strasse_input):
         # Finde Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
-        # --- VERBESSERTE MARKER-LOGIK ---
+        # --- MARKER-LOGIK ---
         marker_coords = None
         if hnr and not gdf.empty:
-            # Versuche präzise Hausnummer zu finden
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
         
-        # Wenn kein HNR Marker, nimm zentrum der gefundenen Straße als Rückfall
         if not marker_coords and not gdf.empty:
-            # Nutze einheitliches Koordinatensystem für berechnung
             gdf_proj = gdf.to_crs(epsg=3857)
             centroid = gdf_proj.geometry.unary_union.centroid
             point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs="EPSG:3857").to_crs("EPSG:4326")
@@ -175,9 +146,37 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.12 (RobustParsing {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.14 (UI CleanUp {SERIAL_NUMBER})**")
 
 st.divider()
+
+# --- EINSTELLUNGEN OBEN ---
+with st.expander("⚙️ Einstellungen", expanded=False):
+    col_set1, col_set2, col_set3 = st.columns(3)
+    
+    with col_set1:
+        st.subheader("🎨 Farben")
+        selected_colors = {}
+        if st.session_state.ort_sammlung:
+            for ort in sorted(st.session_state.ort_sammlung.keys()):
+                selected_colors[ort] = st.color_picker(f"{ort}", "#FF0000", key=f"cp_{ort}")
+        else:
+            st.write("Keine Daten geladen.")
+
+    with col_set2:
+        st.subheader("⚡ Aktionen")
+        if st.button("📋 Liste leeren", use_container_width=True):
+            if os.path.exists(STREETS_FILE):
+                os.remove(STREETS_FILE)
+            st.session_state.saved_manual_streets = []
+            st.success("Liste geleert.")
+            st.rerun()
+
+        if st.button("🗑️ Geocache leeren", use_container_width=True):
+            shutil.rmtree(CACHE_DIR)
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            st.success("Geocache gelöscht.")
+            st.rerun()
 
 # --- EINGABE-LOGIK ---
 col_in1, col_in2 = st.columns(2)
@@ -231,13 +230,9 @@ with col_in1:
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
-            # --- ROBUST PARSING FIX HIER ---
-            # 1. Den gesamten Straßennamen aus der Adresse holen
+            # Parsing Fix
             full_street_address = selected_suggestion.split(',')[0].strip()
-            
-            # 2. Falls der HNR in der Eingabe war, sicherstellen, dass er nicht doppelt ist
             if query_hnr and query_hnr in full_street_address:
-                # Entferne den HNR aus dem Straßennamen, damit er nur im HNR-Feld steht
                 final_street_name = full_street_address.replace(query_hnr, "").strip()
             else:
                 final_street_name = full_street_address
@@ -291,8 +286,8 @@ if st.session_state.run_processing and strassen_liste:
         st_text = st.empty()
         total = len(strassen_liste)
         
-        # Reduzierte Workeranzahl, um 429er zu vermeiden
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        # --- OPTIMIERUNG: Nur 1 Worker, um 429er zu vermeiden ---
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
             for i, future in enumerate(futures):
                 if st.session_state.stop_requested: break
@@ -302,7 +297,7 @@ if st.session_state.run_processing and strassen_liste:
                 else:
                     temp_err.append(res.get("original", "Unbekannt"))
                 
-                # --- VERBESSERTE FORTSCHRITTANZEIGE ---
+                # --- FORTSCHRITTANZEIGE ---
                 current_progress = (i + 1) / total
                 pb.progress(current_progress)
                 st_text.text(f"🔍 Fortschritt: {i+1} von {total} — Verarbeite: {res.get('name', '...')}")
