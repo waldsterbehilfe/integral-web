@@ -23,8 +23,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-# Geocoder ohne künstliche Bremse (ThreadPool regelt das)
-geolocator = Nominatim(user_agent="integral_pro_v59_fast")
+geolocator = Nominatim(user_agent="integral_pro_v60_precision")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -52,29 +51,37 @@ with st.sidebar:
 if bg_toggle:
     st.markdown(f"<style>.stApp {{background-image: url('{GITHUB_BG_URL}'); background-size: cover; background-attachment: fixed; background-color: #0E1117;}}</style>", unsafe_allow_html=True)
 
-# --- SPEED-OPTIMIERTE FUNKTION ---
+# --- PRÄZISIONS-FUNKTION ---
 def verarbeite_strasse(strasse):
     if not strasse: return {"success": False}
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # 1. Schnelle Suche via OSMnx Cache/API
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=500)
+        # 1. VERSUCH: Exakte Suche nach Name (Verhindert das Markieren von Nachbarstraßen)
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
-        # 2. Nur wenn nichts gefunden: Geocoder Fallback (langsam)
+        # Filter: Nur Straßen, die den Namen enthalten (Regex gegen Beifang)
+        if not gdf.empty and 'name' in gdf.columns:
+            gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
+
+        # 2. FALLBACK: Nur wenn absolut nichts gefunden wurde
         if gdf.empty:
             loc = geolocator.geocode(query, timeout=5)
             if loc:
-                gdf = ox.features_from_point((loc.latitude, loc.longitude), tags={"highway": True}, dist=250)
+                # Sehr kleiner Radius (50m) um nur die Zielstraße zu treffen
+                gdf = ox.features_from_point((loc.latitude, loc.longitude), tags={"highway": True}, dist=50)
+                if not gdf.empty and 'name' in gdf.columns:
+                    # Nochmaliger Namens-Check zur Sicherheit
+                    gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
+            if gdf.empty: return {"success": False, "original": strasse}
+            
             osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
             
-            # Ortsteil-Bestimmung (Schnell-Check)
             centroid = gdf.geometry.unary_union.centroid
-            # Wir machen den Reverse-Check nur einmal pro Straße
             loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=5)
             ortsteil = "Unbekannt"
             if loc_rev and 'address' in loc_rev.raw:
@@ -91,43 +98,42 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V5.9 (High Speed)**")
+    st.markdown("Automatisierte Sortierung — **V6.0 (Precision Edition)**")
 
 st.divider()
 col_in1, col_in2 = st.columns(2)
 with col_in1: files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
 with col_in2: 
-    manual_input = st.text_area("Manuelle Eingabe", 
-                                value=st.session_state.manual_text,
-                                placeholder="Straßen untereinander...", 
-                                height=126)
+    manual_input_val = st.text_area("Manuelle Eingabe", 
+                                    value=st.session_state.manual_text,
+                                    placeholder="Straßen untereinander...", 
+                                    height=126)
 
 strassen_liste = []
 if files:
     for f in files: strassen_liste.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
-if manual_input: 
-    strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
+if manual_input_val: 
+    strassen_liste.extend([s.strip() for s in manual_input_val.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 
 if col_btn1.button("🚀 Analyse starten", type="primary"):
-    st.session_state.manual_text = manual_input # Speichern für Rerun-Sicherheit
+    st.session_state.manual_text = manual_input_val 
     st.session_state.run_processing, st.session_state.stop_requested = True, False
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
 if col_btn2.button("🛑 Abbruch", type="secondary"):
     st.session_state.stop_requested, st.session_state.run_processing = True, False
-    st.session_state.manual_text = "" # LEEREN BEI ABBRUCH
+    st.session_state.manual_text = "" 
     st.rerun()
 
-# --- 4. PARALLELE VERARBEITUNG ---
+# --- 4. VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
     temp_ort, temp_err = defaultdict(list), []
     pb = st.progress(0)
     st_text = st.empty()
     
-    # max_workers=2 um Nominatim nicht zu verärgern, aber parallel genug für OSMnx
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
@@ -138,7 +144,7 @@ if st.session_state.run_processing and strassen_liste:
             else:
                 temp_err.append(res.get("original", "Unbekannt"))
             pb.progress((i + 1) / len(strassen_liste))
-            st_text.text(f"🔍 Status: {res.get('name', 'Suche...')}")
+            st_text.text(f"🔍 Prüfe: {res.get('name', 'Suche...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
@@ -161,13 +167,14 @@ if st.session_state.ort_sammlung:
             all_geoms.append(item["gdf"])
             folium.GeoJson(item["gdf"].__geo_interface__,
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                           tooltip=f"{item['name']}").add_to(fg)
+                           tooltip=f"Gefunden: {item['name']}").add_to(fg)
         fg.add_to(m)
     
     folium.LayerControl(collapsed=False).add_to(m)
     if all_geoms:
         combined = gpd.GeoDataFrame(pd.concat(all_geoms))
-        m.fit_bounds([[combined.total_bounds[1], combined.total_bounds[0]], [combined.total_bounds[3], combined.total_bounds[2]]])
+        b = combined.total_bounds
+        m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
     components.html(m._repr_html_(), height=700)
     st.download_button("📥 Karte speichern", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
