@@ -13,7 +13,6 @@ import streamlit.components.v1 as components
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Hintergrundbild-URL wird nicht mehr genutzt
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
 # Cache & Verzeichnisse
@@ -23,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v61_no_bg")
+geolocator = Nominatim(user_agent="integral_pro_v62_status")
 
 # Session State
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
@@ -35,7 +34,6 @@ if 'manual_text' not in st.session_state: st.session_state.manual_text = ""
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
-    # Hintergrundbild-Checkbox entfernt
     st.divider()
     selected_colors = {}
     if st.session_state.ort_sammlung:
@@ -48,7 +46,7 @@ with st.sidebar:
         os.makedirs(CACHE_DIR, exist_ok=True)
         st.rerun()
 
-# Hintergrund-CSS entfernt, nur noch Basis-Farbe
+# Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
 # --- PRÄZISIONS-FUNKTION ---
@@ -58,21 +56,16 @@ def verarbeite_strasse(strasse):
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # 1. VERSUCH: Exakte Suche nach Name
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
-        # Filter: Nur Straßen, die den Namen enthalten
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
-        # 2. FALLBACK: Nur wenn absolut nichts gefunden wurde
         if gdf.empty:
             loc = geolocator.geocode(query, timeout=5)
             if loc:
-                # Sehr kleiner Radius (50m) um nur die Zielstraße zu treffen
                 gdf = ox.features_from_point((loc.latitude, loc.longitude), tags={"highway": True}, dist=50)
                 if not gdf.empty and 'name' in gdf.columns:
-                    # Nochmaliger Namens-Check zur Sicherheit
                     gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
 
         if not gdf.empty:
@@ -98,7 +91,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.1**")
+    st.markdown("Automatisierte Sortierung — **V6.2**")
 
 st.divider()
 col_in1, col_in2 = st.columns(2)
@@ -133,6 +126,7 @@ if st.session_state.run_processing and strassen_liste:
     temp_ort, temp_err = defaultdict(list), []
     pb = st.progress(0)
     st_text = st.empty()
+    total = len(strassen_liste)
     
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
@@ -143,8 +137,10 @@ if st.session_state.run_processing and strassen_liste:
                 temp_ort[res["ort"]].append(res)
             else:
                 temp_err.append(res.get("original", "Unbekannt"))
-            pb.progress((i + 1) / len(strassen_liste))
-            st_text.text(f"🔍 Prüfe: {res.get('name', 'Suche...')}")
+            
+            pb.progress((i + 1) / total)
+            # KORREKTUR: Status-Anzeige (X von Y)
+            st_text.text(f"🔍 Prüfe: {i+1} von {total} — {res.get('name', 'Suche...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
