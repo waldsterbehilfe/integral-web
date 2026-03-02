@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-033" 
+SERIAL_NUMBER = "SN-034" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -261,11 +261,11 @@ if st.session_state.run_processing:
                 else: temp_err.append(res.get("original", "Unbekannt"))
                 pb.progress((i + 1) / total)
 
-    if not st.session_state.stop_requested:
-        st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
-        st.balloons()
-    st.session_state.run_processing = False
-    st.rerun()
+        if not st.session_state.stop_requested:
+            st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
+            st.balloons()
+        st.session_state.run_processing = False
+        st.rerun()
 
 # 5. ANZEIGE
 if st.session_state.ort_sammlung:
@@ -321,6 +321,7 @@ if st.session_state.ort_sammlung:
 else:
     st.info("Bitte Straßen hinzufügen und die Analyse in der Sidebar starten.")
     
-    # Zeige Tabelle zur Übersicht
+    # Zeige Tabelle zur Übersicht (SORTIERT)
     st.write(f"📝 **Aktuelle Liste ({len(st.session_state.saved_manual_streets)})**")
-    st.dataframe(st.session_state.saved_manual_streets, use_container_width=True)
+    sorted_streets = sorted(st.session_state.saved_manual_streets) # HIER WIRD SORTIERT
+    st.dataframe(sorted_streets, use_container_width=True)
