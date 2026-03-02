@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-017" 
+SERIAL_NUMBER = "SN-018" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -125,11 +125,22 @@ def verarbeite_strasse(strasse_input):
         # Finde Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
+        # --- VERBESSERTE MARKER-LOGIK ---
         marker_coords = None
         if hnr and not gdf.empty:
+            # Versuche präzise Hausnummer zu finden
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
+        
+        # Wenn kein HNR Marker, nimm zentrum der gefundenen Straße als Rückfall
+        if not marker_coords and not gdf.empty:
+            # Nutze einheitliches Koordinatensystem für berechnung
+            gdf_proj = gdf.to_crs(epsg=3857)
+            centroid = gdf_proj.geometry.unary_union.centroid
+            # Zurück auf WGS84 für Kartenanzeige
+            point_gdf = gpd.GeoDataFrame(geometry=[centroid], crs=epsg=3857).to_crs(epsg=4326)
+            marker_coords = (point_gdf.geometry.y[0], point_gdf.geometry.x[0])
 
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
@@ -165,7 +176,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.8 (Data Merge {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.9 (PreciseMarkers {SERIAL_NUMBER})**")
 
 st.divider()
 
