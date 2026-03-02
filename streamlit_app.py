@@ -10,50 +10,41 @@ from datetime import datetime
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
 
-# --- 1. SETUP & THEME ---
+# --- 1. SETUP & THEME (Fix auf Dunkel) ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
 # Hintergrundbild Link
 GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
 
-# --- THEME SWITCHER UI (in der Sidebar) ---
+# --- THEME SWITCHER UI (Nur Hintergrund ein/aus) ---
 with st.sidebar:
     st.title("Einstellungen")
-    theme = st.radio("Modus", ["Dunkel", "Hell"], index=0, horizontal=True) # Default Dunkel
+    # Hell-Modus entfernt
     bg_toggle = st.checkbox("Hintergrundbild", value=True)
     st.divider()
 
-# Hintergrundbild Logik via CSS (verbessert)
-if bg_toggle and theme == "Dunkel":
+# Hintergrundbild Logik via CSS
+if bg_toggle:
     st.markdown(f"""
         <style>
             .stApp {{
                 background-image: url('{GITHUB_BG_URL}');
                 background-size: cover;
                 background-attachment: fixed;
+                background-color: #0E1117; /* Fallback */
             }}
         </style>
     """, unsafe_allow_html=True)
 else:
-    # Setzt Hintergrund zurück auf Standard
+    # Nur Hintergrund weg, App bleibt dunkel
     st.markdown("""
         <style>
             .stApp {
                 background-image: none;
-                background-color: #0E1117; /* Dunkler Standardwert für CSS */
+                background-color: #0E1117;
             }
         </style>
     """, unsafe_allow_html=True)
-    
-    # Force Light Mode if selected
-    if theme == "Hell":
-        st.markdown("""
-            <style>
-                .stApp {
-                    background-color: white;
-                }
-            </style>
-        """, unsafe_allow_html=True)
 
 # --- 2. LOGIK (Bleibt gleich) ---
 geolocator = Nominatim(user_agent="integral_pro_app")
@@ -109,7 +100,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V4.6**")
+    st.markdown("Automatisierte Sortierung — **V4.7 (Nur Dunkel)**")
 
 st.divider()
 
