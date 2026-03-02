@@ -1,6 +1,7 @@
 import streamlit as st
 import osmnx as ox
 import folium
+from streamlit_folium import st_folium # Nutzung deiner requirements.txt
 import io, zipfile, os, re
 import pandas as pd
 from collections import defaultdict
@@ -11,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
+# Cache für OSMNX (Persistent für Performance)
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -18,7 +20,7 @@ ox.settings.cache_folder = f"./{CACHE_DIR}"
 
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 
-# --- 2. LOGIK MIT PARALLELISIERUNG & AUTO-KORREKTUR ---
+# --- 2. LOGIK ---
 def similarity(a, b):
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
@@ -90,7 +92,7 @@ strassen_liste = list(dict.fromkeys(strassen_liste))
 if st.button("🚀 Turbo-Analyse starten", type="primary"):
     st.session_state.run_processing = True
 
-# --- VERARBEITUNG (Turbo-Modus) ---
+# --- VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
     ort_sammlung = defaultdict(list)
     fehler_liste = []
