@@ -1,7 +1,7 @@
 import streamlit as st
 import osmnx as ox
 import folium
-import io, re, os, random
+import io, re, os, random, shutil
 import pandas as pd
 import geopandas as gpd
 from collections import defaultdict
@@ -17,10 +17,31 @@ st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 # Hintergrundbild Link (Raw)
 GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
 
-# --- THEME SWITCHER UI (Sidebar) ---
+# --- 2. LOGIK & CACHE ---
+geolocator = Nominatim(user_agent="integral_pro_app")
+reverse = RateLimiter(geolocator.reverse, min_delay_seconds=1)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "persistent_geocache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+ox.settings.use_cache = True
+ox.settings.cache_folder = CACHE_DIR
+
+# --- THEME SWITCHER UI & CACHE BUTTON (Sidebar) ---
 with st.sidebar:
     st.title("Einstellungen")
     bg_toggle = st.checkbox("Hintergrundbild", value=True)
+    st.divider()
+    st.subheader("Wartung")
+    # NEU: Cache leeren Button
+    if st.button("🗑️ Geocache leeren"):
+        try:
+            shutil.rmtree(CACHE_DIR)
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            st.success("Cache wurde geleert!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Fehler beim Leeren: {e}")
     st.divider()
 
 # Hintergrundbild Logik via CSS
@@ -44,16 +65,6 @@ else:
             }
         </style>
     """, unsafe_allow_html=True)
-
-# --- 2. LOGIK ---
-geolocator = Nominatim(user_agent="integral_pro_app")
-reverse = RateLimiter(geolocator.reverse, min_delay_seconds=1)
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "persistent_geocache")
-os.makedirs(CACHE_DIR, exist_ok=True)
-ox.settings.use_cache = True
-ox.settings.cache_folder = CACHE_DIR
 
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
@@ -99,7 +110,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V4.9 (Stable)**")
+    st.markdown("Automatisierte Sortierung — **V5.0 (mit Cache-Button)**")
 
 st.divider()
 
