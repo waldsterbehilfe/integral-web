@@ -25,7 +25,7 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent="integral_pro_v71_permanent")
+geolocator = Nominatim(user_agent="integral_pro_v72_fix")
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -134,7 +134,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V7.1 (Permanent Storage)**")
+    st.markdown("Automatisierte Sortierung — **V7.2 (Button Fix)**")
 
 st.divider()
 
@@ -168,6 +168,7 @@ with col_in1:
     
     if st.session_state.search_results:
         selected_suggestion = st.selectbox("Auswahl aus Bekannten:", st.session_state.search_results)
+        # BUTTON FIX: Hier war der Fehler
         if st.button("➕ Hinzufügen"):
             if selected_suggestion not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(selected_suggestion)
