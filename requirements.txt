@@ -1,7 +1,6 @@
 streamlit
-streamlit-folium
-folium
 osmnx
+folium
+streamlit-folium
 geopandas
-pyproj
-shapely
+pandas
