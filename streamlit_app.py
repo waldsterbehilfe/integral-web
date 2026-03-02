@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-029" 
+SERIAL_NUMBER = "SN-030" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -69,7 +69,6 @@ def create_excel_download(ort_sammlung):
     df = pd.DataFrame(data)
     
     output = io.BytesIO()
-    # HINWEIS: Hierfür wird 'xlsxwriter' benötigt!
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Analyseergebnisse')
     return output.getvalue()
@@ -90,7 +89,7 @@ def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
     # --- PAUSE ---
-    time.sleep(random.uniform(1.0, 1.8))
+    time.sleep(random.uniform(0.5, 1.0))
     
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
@@ -152,47 +151,42 @@ def verarbeite_strasse(strasse_input):
         pass
     return {"success": False, "original": strasse_input}
 
-# --- 3. UI ---
+# --- 3. UI LAYOUT ---
+# Header
 col_logo, col_title = st.columns([1, 10])
-with col_logo: st.image(LOGO_URL, width=120)
+with col_logo: st.image(LOGO_URL, width=80)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.20 (Confirmed {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Straßensortierung — **V9.21 (LayoutUpdate {SERIAL_NUMBER})**")
 
 st.divider()
 
-# --- EINSTELLUNGEN OBEN ---
-with st.expander("⚙️ Einstellungen", expanded=False):
-    col_set1, col_set2, col_set3 = st.columns(3)
+# Layout: 2 Spalten (Eingabe links, Karte rechts)
+col_left, col_right = st.columns([1, 2])
+
+with col_left:
+    st.subheader("📥 Dateneingabe")
     
-    with col_set1:
-        st.subheader("🎨 Farben")
-        selected_colors = {}
+    with st.expander("🛠️ Einstellungen & Aktionen", expanded=False):
+        st.write("🎨 **Farbeinstellungen**")
         if st.session_state.ort_sammlung:
             for ort in sorted(st.session_state.ort_sammlung.keys()):
-                selected_colors[ort] = st.color_picker(f"{ort}", "#FF0000", key=f"cp_{ort}")
+                st.color_picker(f"{ort}", "#FF0000", key=f"cp_{ort}")
         else:
-            st.write("Keine Daten geladen.")
-
-    with col_set2:
-        st.subheader("⚡ Aktionen")
-        if st.button("📋 Liste leeren", use_container_width=True):
-            if os.path.exists(STREETS_FILE):
-                os.remove(STREETS_FILE)
+            st.write("Farben verfügbar nach Analyse.")
+        
+        st.write("⚡ **Cache & Liste**")
+        col_c1, col_c2 = st.columns(2)
+        if col_c1.button("📋 Liste leeren"):
+            if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
             st.session_state.saved_manual_streets = []
-            st.success("Liste geleert.")
             st.rerun()
-
-        if st.button("🗑️ Cache komplett leeren", use_container_width=True):
+        if col_c2.button("🗑️ Cache leeren"):
             clear_all_caches()
-            st.success("Alle Caches wurden geleert.")
             st.rerun()
 
-# --- EINGABE-LOGIK ---
-col_in1, col_in2 = st.columns(2)
-with col_in1: 
-    files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
-    
+    # File Uploader
+    files = st.file_uploader("Upload TXT Dateien", type=["txt"], accept_multiple_files=True)
     if files:
         new_streets = []
         for f in files: 
@@ -205,29 +199,30 @@ with col_in1:
             save_streets(st.session_state.saved_manual_streets)
             st.success(f"{len(new_streets)} Straßen hinzugefügt.")
             st.rerun()
-    
-    st.subheader("🔍 Straßensuche")
-    col_str, col_hnr = st.columns([3, 1])
-    with col_str: query_street = st.text_input("Name:", placeholder="z.B. Am Markt")
-    with col_hnr: query_hnr = st.text_input("Nr.:", placeholder="12a")
+
+    # Manuelle Suche
+    st.markdown("---")
+    st.write("🔍 **Einzelne Straße suchen**")
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1: query_street = st.text_input("Name:", placeholder="z.B. Am Markt")
+    with col_s2: query_hnr = st.text_input("Nr.:", placeholder="12a")
     
     combined_query = f"{query_street} {query_hnr}".strip()
     selected_suggestion = None
     if len(query_street) > 2:
         with st.spinner("Prüfe..."):
             try:
-                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=10)
+                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
                 if results:
                     st.session_state.online_suggestions = [r.address for r in results]
-                    selected_suggestion = st.selectbox("Ähnliche:", st.session_state.online_suggestions)
+                    selected_suggestion = st.selectbox("Gefundene Adressen:", st.session_state.online_suggestions)
                 else:
                     st.write("Keine Übereinstimmung.")
             except Exception as e:
                 st.error(f"Fehler: {e}")
 
-    with st.form("manual_add_form", clear_on_submit=False):
-        submit_btn = st.form_submit_button("➕ Hinzufügen")
-        if submit_btn and selected_suggestion:
+    if st.button("➕ Straße hinzufügen"):
+        if selected_suggestion:
             full_street_address = selected_suggestion.split(',')[0].strip()
             if query_hnr and query_hnr in full_street_address:
                 final_street_name = full_street_address.replace(query_hnr, "").strip()
@@ -237,91 +232,83 @@ with col_in1:
             if street_to_save not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
-                st.success("Hinzugefügt")
                 st.rerun()
 
-with col_in2: 
-    st.subheader("📝 Liste")
-    if st.button("🔄 Aktualisieren"):
-        clear_all_caches()
-        st.session_state.saved_manual_streets = load_streets()
+    # Eingabeliste Anzeige
+    st.markdown("---")
+    st.write(f"📝 **Liste ({len(st.session_state.saved_manual_streets)})**")
+    st.dataframe(st.session_state.saved_manual_streets, use_container_width=True, height=200)
+    
+    # Analyse Buttons
+    col_b1, col_b2 = st.columns(2)
+    if col_b1.button("🚀 Analyse starten", type="primary"):
+        st.session_state.run_processing, st.session_state.stop_requested = True, False
+        st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
+    if col_b2.button("🛑 Abbruch"):
+        st.session_state.stop_requested, st.session_state.run_processing = False, False
         st.rerun()
+
+with col_right:
+    # 4. VERARBEITUNG & 5. ANZEIGE
+    if st.session_state.run_processing:
+        strassen_liste = [s for s in st.session_state.saved_manual_streets if s]
+        temp_ort, temp_err = defaultdict(list), []
+        with st.spinner("🔍 Analysiere Straßen..."):
+            pb = st.progress(0)
+            total = len(strassen_liste)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
+                for i, future in enumerate(futures):
+                    if st.session_state.stop_requested: break
+                    res = future.result()
+                    if res.get("success"): temp_ort[res["ort"]].append(res)
+                    else: temp_err.append(res.get("original", "Unbekannt"))
+                    pb.progress((i + 1) / total)
+
+        if not st.session_state.stop_requested:
+            st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
+            st.balloons()
+        st.session_state.run_processing = False
+        st.rerun()
+
+    if st.session_state.ort_sammlung:
+        st.subheader("🗺️ Karte")
+        if st.session_state.fehler_liste:
+            with st.expander("⚠️ Nicht gefunden"): st.write(", ".join(st.session_state.fehler_liste))
+
+        m = folium.Map(location=[50.8, 8.8], zoom_start=11)
+        all_geoms = []
+        marker_fg = folium.FeatureGroup(name="📍 Marker")
+
+        for ort, items in st.session_state.ort_sammlung.items():
+            color = st.session_state.get(f"cp_{ort}", "#FF0000")
+            fg = folium.FeatureGroup(name=f"📍 {ort}")
+            for item in items:
+                all_geoms.append(item["gdf"])
+                folium.GeoJson(item["gdf"].__geo_interface__,
+                               style_function=lambda x, c=color: {'color': c, 'weight': 5, 'opacity': 0.7},
+                               tooltip=f"{item['name']}").add_to(fg)
+                if item.get("marker"):
+                    folium.Marker(location=item["marker"], popup=f"{item['original']}", icon=folium.Icon(color="blue", icon="info-sign")).add_to(marker_fg)
+            fg.add_to(m)
         
-    st.write(f"Anzahl: {len(st.session_state.saved_manual_streets)}")
-    df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straße | Hausnummer"])
-    st.dataframe(df_list, use_container_width=True, height=200)
+        marker_fg.add_to(m)
+        folium.LayerControl(collapsed=False).add_to(m)
+        
+        if all_geoms:
+            combined = gpd.GeoDataFrame(pd.concat(all_geoms))
+            b = combined.total_bounds
+            m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
-# Analyse starten
-strassen_liste = [s for s in st.session_state.saved_manual_streets if s]
-col_btn1, col_btn2, col_excel = st.columns([1, 1, 2])
-
-if col_btn1.button("🚀 Analyse", type="primary"):
-    st.session_state.run_processing, st.session_state.stop_requested = True, False
-    st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
-
-if col_btn2.button("🛑 Abbruch", type="secondary"):
-    st.session_state.stop_requested, st.session_state.run_processing = False, False
-    st.rerun()
-
-# 4. VERARBEITUNG
-if st.session_state.run_processing and strassen_liste:
-    temp_ort, temp_err = defaultdict(list), []
-    with st.spinner("Läuft..."):
-        pb = st.progress(0)
-        st_text = st.empty()
-        total = len(strassen_liste)
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
-            for i, future in enumerate(futures):
-                if st.session_state.stop_requested: break
-                res = future.result()
-                if res.get("success"): temp_ort[res["ort"]].append(res)
-                else: temp_err.append(res.get("original", "Unbekannt"))
-                current_progress = (i + 1) / total
-                pb.progress(current_progress)
-                st_text.text(f"🔍 {i+1}/{total} — {res.get('name', '...')}")
-
-    if not st.session_state.stop_requested:
-        st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
-        st.balloons()
-    st.session_state.run_processing = False
-    st.rerun()
-
-# 5. ANZEIGE
-if st.session_state.ort_sammlung:
-    if st.session_state.fehler_liste:
-        with st.expander("⚠️ Nicht gefunden"): st.write(", ".join(st.session_state.fehler_liste))
-
-    m = folium.Map(location=[50.8, 8.8], zoom_start=11)
-    all_geoms = []
-    marker_fg = folium.FeatureGroup(name="📍 Marker")
-
-    for ort, items in st.session_state.ort_sammlung.items():
-        color = selected_colors.get(ort, "#FF0000")
-        fg = folium.FeatureGroup(name=f"📍 {ort}")
-        for item in items:
-            all_geoms.append(item["gdf"])
-            folium.GeoJson(item["gdf"].__geo_interface__,
-                           style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                           tooltip=f"{item['name']}").add_to(fg)
-            if item.get("marker"):
-                folium.Marker(location=item["marker"], popup=f"{item['original']}", icon=folium.Icon(color="blue", icon="info-sign")).add_to(marker_fg)
-        fg.add_to(m)
-    
-    marker_fg.add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
-    
-    if all_geoms:
-        combined = gpd.GeoDataFrame(pd.concat(all_geoms))
-        b = combined.total_bounds
-        m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
-
-    components.html(m._repr_html_(), height=700)
-    
-    try:
-        excel_data = create_excel_download(st.session_state.ort_sammlung)
-        col_excel.download_button("📥 Excel", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-    except ImportError:
-        st.error("Fehler: 'xlsxwriter' ist nicht installiert. Bitte requirements.txt aktualisieren.")
-    
-    st.download_button("📥 Karte", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
+        components.html(m._repr_html_(), height=600)
+        
+        # Downloads
+        st.markdown("---")
+        st.write("📥 **Downloads**")
+        col_d1, col_d2 = st.columns(2)
+        try:
+            excel_data = create_excel_download(st.session_state.ort_sammlung)
+            col_d1.download_button("Excel exportieren", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        except ImportError:
+            col_d1.error("xlsxwriter fehlt.")
+        col_d2.download_button("Karte speichern (HTML)", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
