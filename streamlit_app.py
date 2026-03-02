@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-027" 
+SERIAL_NUMBER = "SN-028" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -69,6 +69,7 @@ def create_excel_download(ort_sammlung):
     df = pd.DataFrame(data)
     
     output = io.BytesIO()
+    # HINWEIS: Hierfür wird 'xlsxwriter' benötigt!
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Analyseergebnisse')
     return output.getvalue()
@@ -104,13 +105,12 @@ def verarbeite_strasse(strasse_input):
     
     try:
         # 1. Finde die Geometrie der Straße
-        # dist klein halten, damit nur diese Straße gefunden wird
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=30)
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
 
-        # 2. Filtere auf den exakten Namen, um "Beifang" zu vermeiden
+        # 2. Filtere auf den exakten Namen
         gdf = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
         
         if gdf.empty:
@@ -119,7 +119,6 @@ def verarbeite_strasse(strasse_input):
         # --- PRÄZISERE MARKER-LOGIK (NUR BEI HNR) ---
         marker_coords = None
         if hnr:
-            # Versuche exakte Koordinate für Straße + HNR
             loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=10)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
@@ -129,11 +128,9 @@ def verarbeite_strasse(strasse_input):
         osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
         
         ortsteil = "Unbekannt"
-        # Versuche Ortsteil aus OSM Daten zu lesen
         if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
         elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
         
-        # Fallback auf reverse Geocoding (etwas ungenauer, aber oft nötig)
         if ortsteil == "Unbekannt" or pd.isna(ortsteil):
             try:
                 centroid = gdf.geometry.unary_union.centroid
@@ -160,7 +157,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.18 (StrictFilter {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.19 (DependencyFix {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -188,7 +185,7 @@ with st.expander("⚙️ Einstellungen", expanded=False):
 
         if st.button("🗑️ Cache komplett leeren", use_container_width=True):
             clear_all_caches()
-            st.success("Alle Caches (Persistent, OSMNx, Streamlit) wurden geleert.")
+            st.success("Alle Caches wurden geleert.")
             st.rerun()
 
 # --- EINGABE-LOGIK ---
@@ -196,7 +193,6 @@ col_in1, col_in2 = st.columns(2)
 with col_in1: 
     files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
     
-    # --- AUTOMATISCHER TRANSFER ---
     if files:
         new_streets = []
         for f in files: 
@@ -207,75 +203,59 @@ with col_in1:
         if len(merged_streets) > len(st.session_state.saved_manual_streets):
             st.session_state.saved_manual_streets = merged_streets
             save_streets(st.session_state.saved_manual_streets)
-            st.success(f"{len(new_streets)} Straßen aus Dateien hinzugefügt.")
+            st.success(f"{len(new_streets)} Straßen hinzugefügt.")
             st.rerun()
     
-    st.subheader("🔍 Straßensuche (Live-Prüfung)")
-    
+    st.subheader("🔍 Straßensuche")
     col_str, col_hnr = st.columns([3, 1])
-    with col_str:
-        query_street = st.text_input("Name der Straße:", placeholder="z.B. Am Markt")
-    with col_hnr:
-        query_hnr = st.text_input("Nr.:", placeholder="12a")
+    with col_str: query_street = st.text_input("Name:", placeholder="z.B. Am Markt")
+    with col_hnr: query_hnr = st.text_input("Nr.:", placeholder="12a")
     
     combined_query = f"{query_street} {query_hnr}".strip()
-    
-    # --- ONLINE-VALIDIERUNG ---
     selected_suggestion = None
     if len(query_street) > 2:
-        with st.spinner("Prüfe Schreibweise..."):
+        with st.spinner("Prüfe..."):
             try:
                 results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=10)
                 if results:
                     st.session_state.online_suggestions = [r.address for r in results]
-                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
+                    selected_suggestion = st.selectbox("Ähnliche:", st.session_state.online_suggestions)
                 else:
-                    st.write("Keine Übereinstimmung gefunden.")
+                    st.write("Keine Übereinstimmung.")
             except Exception as e:
-                if "429" in str(e):
-                    st.error("Too Many Requests: Der Server ist überlastet. Bitte warten Sie 10 Sekunden und versuchen es erneut.")
-                else:
-                    st.error(f"Fehler bei der Online-Prüfung: {e}")
+                st.error(f"Fehler: {e}")
 
     with st.form("manual_add_form", clear_on_submit=False):
-        submit_btn = st.form_submit_button("➕ Straße hinzufügen")
-        
+        submit_btn = st.form_submit_button("➕ Hinzufügen")
         if submit_btn and selected_suggestion:
             full_street_address = selected_suggestion.split(',')[0].strip()
             if query_hnr and query_hnr in full_street_address:
                 final_street_name = full_street_address.replace(query_hnr, "").strip()
             else:
                 final_street_name = full_street_address
-            
             street_to_save = f"{final_street_name} | {query_hnr}".strip(" |")
-            
             if street_to_save not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
-                st.success(f"Hinzugefügt: {street_to_save}")
+                st.success("Hinzugefügt")
                 st.rerun()
 
 with col_in2: 
-    st.subheader("📝 Eingabeliste (Gespeichert)")
-    
-    if st.button("🔄 Liste aktualisieren"):
+    st.subheader("📝 Liste")
+    if st.button("🔄 Aktualisieren"):
         clear_all_caches()
         st.session_state.saved_manual_streets = load_streets()
-        st.success("Daten wurden frisch aus dem Netz geladen.")
         st.rerun()
         
-    # --- VERBESSERTE LISTE ---
     st.write(f"Anzahl: {len(st.session_state.saved_manual_streets)}")
     df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straße | Hausnummer"])
     st.dataframe(df_list, use_container_width=True, height=200)
 
-# Finale Liste für die Analyse
-strassen_liste = st.session_state.saved_manual_streets
-strassen_liste = [s for s in strassen_liste if s]
-
+# Analyse starten
+strassen_liste = [s for s in st.session_state.saved_manual_streets if s]
 col_btn1, col_btn2, col_excel = st.columns([1, 1, 2])
 
-if col_btn1.button("🚀 Analyse starten", type="primary"):
+if col_btn1.button("🚀 Analyse", type="primary"):
     st.session_state.run_processing, st.session_state.stop_requested = True, False
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
@@ -283,31 +263,23 @@ if col_btn2.button("🛑 Abbruch", type="secondary"):
     st.session_state.stop_requested, st.session_state.run_processing = False, False
     st.rerun()
 
-# --- 4. VERARBEITUNG ---
+# 4. VERARBEITUNG
 if st.session_state.run_processing and strassen_liste:
     temp_ort, temp_err = defaultdict(list), []
-    
-    # --- LOADINGSPINNER ---
-    with st.spinner("Analyse läuft... Das kann einen Moment dauern."):
+    with st.spinner("Läuft..."):
         pb = st.progress(0)
         st_text = st.empty()
         total = len(strassen_liste)
-        
-        # --- OPTIMIERUNG: Nur 1 Worker, um 429er zu vermeiden ---
         with ThreadPoolExecutor(max_workers=1) as executor:
             futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
             for i, future in enumerate(futures):
                 if st.session_state.stop_requested: break
                 res = future.result()
-                if res.get("success"):
-                    temp_ort[res["ort"]].append(res)
-                else:
-                    temp_err.append(res.get("original", "Unbekannt"))
-                
-                # --- FORTSCHRITTANZEIGE "X/Y Straßen" ---
+                if res.get("success"): temp_ort[res["ort"]].append(res)
+                else: temp_err.append(res.get("original", "Unbekannt"))
                 current_progress = (i + 1) / total
                 pb.progress(current_progress)
-                st_text.text(f"🔍 Fortschritt: {i+1}/{total} Straßen — Verarbeite: {res.get('name', '...')}")
+                st_text.text(f"🔍 {i+1}/{total} — {res.get('name', '...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
@@ -315,35 +287,25 @@ if st.session_state.run_processing and strassen_liste:
     st.session_state.run_processing = False
     st.rerun()
 
-# --- 5. ANZEIGE ---
+# 5. ANZEIGE
 if st.session_state.ort_sammlung:
     if st.session_state.fehler_liste:
-        with st.expander("⚠️ Nicht gefunden"):
-            st.write(", ".join(st.session_state.fehler_liste))
+        with st.expander("⚠️ Nicht gefunden"): st.write(", ".join(st.session_state.fehler_liste))
 
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
-    
-    marker_fg = folium.FeatureGroup(name="📍 Hausnummern-Marker")
+    marker_fg = folium.FeatureGroup(name="📍 Marker")
 
     for ort, items in st.session_state.ort_sammlung.items():
         color = selected_colors.get(ort, "#FF0000")
-        fg = folium.FeatureGroup(name=f"📍 {ort} ({len(items)} Str.)")
+        fg = folium.FeatureGroup(name=f"📍 {ort}")
         for item in items:
             all_geoms.append(item["gdf"])
             folium.GeoJson(item["gdf"].__geo_interface__,
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                           tooltip=f"Gefunden: {item['name']}").add_to(fg)
-            
-            # --- NUR MARKER WENN HNR BEKANNT ---
+                           tooltip=f"{item['name']}").add_to(fg)
             if item.get("marker"):
-                folium.Marker(
-                    location=item["marker"],
-                    # Zeige originale Eingabe im Popup
-                    popup=f"Adresse: {item['original']}",
-                    icon=folium.Icon(color="blue", icon="info-sign")
-                ).add_to(marker_fg)
-                
+                folium.Marker(location=item["marker"], popup=f"{item['original']}", icon=folium.Icon(color="blue", icon="info-sign")).add_to(marker_fg)
         fg.add_to(m)
     
     marker_fg.add_to(m)
@@ -356,13 +318,10 @@ if st.session_state.ort_sammlung:
 
     components.html(m._repr_html_(), height=700)
     
-    excel_data = create_excel_download(st.session_state.ort_sammlung)
-    col_excel.download_button(
-        "📥 Analyse als Excel exportieren",
-        excel_data,
-        file_name=f"Analyse_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    try:
+        excel_data = create_excel_download(st.session_state.ort_sammlung)
+        col_excel.download_button("📥 Excel", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    except ImportError:
+        st.error("Fehler: 'xlsxwriter' ist nicht installiert. Bitte requirements.txt aktualisieren.")
     
-    st.download_button("📥 Karte speichern (HTML)", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
+    st.download_button("📥 Karte", m._repr_html_(), file_name="Ergebnis.html", mime="text/html")
