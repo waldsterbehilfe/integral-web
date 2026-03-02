@@ -22,14 +22,31 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v66_form")
+# --- DATEI FÜR MANUELLE LISTEN ---
+STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-# Session State
+geolocator = Nominatim(user_agent="integral_pro_v71_permanent")
+
+# --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
+def save_streets(streets_list):
+    with open(STREETS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(streets_list))
+
+def load_streets():
+    if os.path.exists(STREETS_FILE):
+        with open(STREETS_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
+    return []
+
+# Session State - Initialisierung
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-if 'manual_text' not in st.session_state: st.session_state.manual_text = ""
+if 'search_results' not in st.session_state: st.session_state.search_results = []
+if 'uploaded_streets' not in st.session_state: st.session_state.uploaded_streets = []
+# Lade gespeicherte Straßen beim Start
+if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -44,6 +61,13 @@ with st.sidebar:
     if st.button("🗑️ Geocache leeren", use_container_width=True):
         shutil.rmtree(CACHE_DIR)
         os.makedirs(CACHE_DIR, exist_ok=True)
+        st.success("Geocache gelöscht.")
+        st.rerun()
+    if st.button("🗑️ Manuelle Liste leeren", use_container_width=True):
+        if os.path.exists(STREETS_FILE):
+            os.remove(STREETS_FILE)
+        st.session_state.saved_manual_streets = []
+        st.success("Manuelle Liste gelöscht.")
         st.rerun()
 
 # Hintergrundfarbe
@@ -110,48 +134,60 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.6 (Form Input Fix)**")
+    st.markdown("Automatisierte Sortierung — **V7.1 (Permanent Storage)**")
 
 st.divider()
 
-# --- NEUE EINGABE-LOGIK MIT FORM ---
+# --- EINGABE-LOGIK ---
 col_in1, col_in2 = st.columns(2)
 with col_in1: 
     files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
     
-    st.subheader("🔍 Straßensuche")
-    # Formular zur sicheren Eingabe
-    with st.form("search_form"):
-        query_input = st.text_input("Straße", placeholder="Name eingeben...", label_visibility="collapsed")
-        submit_button = st.form_submit_button("➕ Hinzufügen")
-        
-        if submit_button and query_input:
-            with st.spinner("Suche..."):
-                try:
-                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=True, timeout=5)
-                    if results:
-                        st.session_state.manual_text += f"{results.address.split(',')[0]}\n"
-                        st.success(f"Gefunden: {results.address.split(',')[0]}")
-                    else:
-                        st.warning("Nicht gefunden.")
-                except:
-                    st.error("Fehler bei der Suche.")
+    # Straßen aus Dateien auslesen
+    if files:
+        file_streets = []
+        for f in files: file_streets.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
+        st.session_state.uploaded_streets = list(set(file_streets))
+    else:
+        st.session_state.uploaded_streets = []
+    
+    # Kombiniere bekannte Straßen für die Suche (aus Datei + gespeichert)
+    known_streets = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
+    known_streets = [s for s in known_streets if s]
+    
+    st.subheader("🔍 Straßensuche (Lokal)")
+    
+    def local_search_callback():
+        query = st.session_state.search_input
+        if len(query) > 0:
+            st.session_state.search_results = [s for s in known_streets if query.lower() in s.lower()]
+        else:
+            st.session_state.search_results = []
+
+    st.text_input("Straße", placeholder="Name eingeben...", key="search_input", on_change=local_search_callback, label_visibility="collapsed")
+    
+    if st.session_state.search_results:
+        selected_suggestion = st.selectbox("Auswahl aus Bekannten:", st.session_state.search_results)
+        if st.button("➕ Hinzufügen"):
+            if selected_suggestion not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(selected_suggestion)
+                save_streets(st.session_state.saved_manual_streets)
+                st.session_state.search_results = []
+                st.rerun()
 
 with col_in2: 
-    st.subheader("📝 Eingabeliste")
-    # Das Textfeld wird nun über eine Variable befüllt
+    st.subheader("📝 Eingabeliste (Gespeichert)")
+    # Zeige die gespeicherten Straßen an
+    display_text = "\n".join(st.session_state.saved_manual_streets)
     st.text_area("Straßenliste", 
-                 value=st.session_state.manual_text,
+                 value=display_text,
                  height=200,
                  disabled=True,
                  key="display_text_area")
 
-strassen_liste = []
-if files:
-    for f in files: strassen_liste.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
-if st.session_state.manual_text: 
-    strassen_liste.extend([s.strip() for s in st.session_state.manual_text.splitlines() if s.strip()])
-strassen_liste = list(dict.fromkeys(strassen_liste))
+# Finale Liste für die Analyse
+strassen_liste = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
+strassen_liste = [s for s in strassen_liste if s]
 
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 
@@ -160,8 +196,7 @@ if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
 if col_btn2.button("🛑 Abbruch", type="secondary"):
-    st.session_state.stop_requested, st.session_state.run_processing = True, False
-    st.session_state.manual_text = "" 
+    st.session_state.stop_requested, st.session_state.run_processing = False, False
     st.rerun()
 
 # --- 4. VERARBEITUNG ---
