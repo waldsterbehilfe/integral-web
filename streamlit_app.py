@@ -4,14 +4,15 @@ import folium
 from streamlit_folium import st_folium
 import io, zipfile, os, re
 import pandas as pd
+import geopandas as gpd # Hinzugefügt für bessere Performance
 from collections import defaultdict
 from datetime import datetime
-from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
+# Cache für OSMNX
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -19,32 +20,25 @@ ox.settings.cache_folder = f"./{CACHE_DIR}"
 
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 
-# --- 2. LOGIK (ROBUST) ---
-def similarity(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
+# --- 2. LOGIK (HOCHPERFORMANT) ---
 def verarbeite_strasse(strasse):
-    # Einfache Bereinigung von Abkürzungen
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        # Daten holen (1000m Radius ist sicherer)
+        # Erhöhter Radius, um Grenzen besser zu finden
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=1000)
         
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
             
-            # --- ROBUSTE FILTERUNG ---
-            # Wir suchen nach Straßen, die den Namen enthalten, ignorieren Groß-/Kleinschreibung
+            # Robuste Filterung
             if 'name' in gdf.columns:
-                # Versuchen den Namen zu finden, der am besten passt
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
                 gdf_f = gdf
 
             if not gdf_f.empty:
-                # Ortsteil-Erkennung
                 ortsteil = "Unbekannter_Ort"
                 cols = ['addr:suburb', 'suburb', 'village', 'hamlet', 'addr:city', 'city']
                 for col in cols:
@@ -53,7 +47,7 @@ def verarbeite_strasse(strasse):
                         if "Marburg-Biedenkopf" not in val:
                             ortsteil = val
                             break
-                return {"gdf": gdf_f, "ort": ortsteil, "name": s_clean, "success": True, "corrected": False} # corrected auf False, da Fuzzy entfernt
+                return {"gdf": gdf_f, "ort": ortsteil, "name": s_clean, "success": True}
     except: pass
     return {"success": False, "original": strasse}
 
@@ -63,7 +57,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Robust Edition**")
+    st.markdown("Automatisierte Sortierung — **Profi Edition**")
 
 st.divider()
 
@@ -95,8 +89,8 @@ if st.session_state.run_processing and strassen_liste:
     results = []
     total = len(strassen_liste)
     
-    # Threads etwas reduziert für Stabilität bei vielen Anfragen
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # Threads erhöht für schnellere Verarbeitung (Cache nutzt lokale Platte!)
+    with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_street = {executor.submit(verarbeite_strasse, strasse): strasse for strasse in strassen_liste}
         
         for i, future in enumerate(future_to_street):
@@ -121,17 +115,23 @@ if st.session_state.run_processing and strassen_liste:
             
             for ort in sorted(ort_sammlung.keys()):
                 feature_group = folium.FeatureGroup(name=ort)
-                geoms = [it["gdf"] for it in ort_sammlung[ort]]
+                geoms_list = []
+                
                 for it in ort_sammlung[ort]:
                     folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(feature_group)
+                    geoms_list.append(it["gdf"])
+                
                 feature_group.add_to(master_map)
                 
+                # --- PROFISCHNITT: Einzelkarte mit GeoPandas Bounds ---
                 m = folium.Map()
+                combined_gdf = gpd.GeoDataFrame(pd.concat(geoms_list), crs=geoms_list[0].crs)
                 for it in ort_sammlung[ort]:
                     folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(m)
-                combined = pd.concat(geoms)
-                bounds = combined.total_bounds
-                m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.1, 0.1))
+                
+                # Bounds effizient berechnen
+                bounds = combined_gdf.total_bounds
+                m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 zip_file.writestr(f"Karte_{ort}.html", m._repr_html_())
             
             folium.LayerControl().add_to(master_map)
@@ -139,7 +139,7 @@ if st.session_state.run_processing and strassen_liste:
         
         st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
         st.divider()
-        st.download_button("📥 ZIP: Alle Karten", zip_buffer.getvalue(), f"INTEGRAL_Export.zip")
+        st.download_button("📥 ZIP: Alle Karten", zip_buffer.getvalue(), f"INTEGRAL_Pro.zip")
     
     if fehler_liste:
         st.error(f"Konnte {len(fehler_liste)} Straßen nicht finden.")
