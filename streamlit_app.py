@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-042" 
+SERIAL_NUMBER = "SN-043" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -30,7 +30,7 @@ ox.settings.cache_folder = CACHE_DIR
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
 # --- OPTIMIERUNG: Timeout für geolocator ---
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=5) # Strengerer Timeout
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -93,8 +93,8 @@ st.markdown("""
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # --- PAUSE HÖHER: SCHUTZ VOR 429 FEHLER ---
-    time.sleep(random.uniform(0.5, 1.0))
+    # --- PAUSE VERRINGERT, DAFÜR MEHR THREADS ---
+    time.sleep(random.uniform(0.1, 0.3))
     
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
@@ -107,6 +107,7 @@ def verarbeite_strasse(strasse_input):
     query = f"{strasse_name}, Marburg-Biedenkopf"
     
     try:
+        # Finde die Geometrie der Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
         if gdf.empty:
@@ -119,7 +120,7 @@ def verarbeite_strasse(strasse_input):
 
         marker_coords = None
         if hnr:
-            loc = geolocator.geocode(f"{strasse_name} {hnr}, Marburg-Biedenkopf", timeout=10)
+            loc = geolocator.geocode(f"{strasse_name} {hnr}, Marburg-Biedenkopf", timeout=5)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
 
@@ -134,7 +135,7 @@ def verarbeite_strasse(strasse_input):
         if ortsteil == "Unbekannt" or pd.isna(ortsteil):
             try:
                 centroid = gdf.geometry.unary_union.centroid
-                loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=3)
+                loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de', timeout=2)
                 if loc_rev and 'address' in loc_rev.raw:
                     a = loc_rev.raw['address']
                     ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
@@ -149,6 +150,8 @@ def verarbeite_strasse(strasse_input):
             "success": True
         }
     except Exception as e:
+        # --- ROBUSTE FEHLERBEHANDLUNG ---
+        print(f"Fehler bei {strasse_name}: {e}")
         pass
         
     return {"success": False, "original": strasse_input}
@@ -248,7 +251,8 @@ if st.session_state.run_processing:
     with st.spinner("🔍 Analysiere Straßen... Das kann dauern."):
         pb = st.progress(0)
         total = len(strassen_liste)
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        # --- MEHR THREADS FÜR STABILITÄT ---
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
             for i, future in enumerate(futures):
                 if st.session_state.stop_requested: break
