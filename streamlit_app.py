@@ -4,15 +4,15 @@ import folium
 from streamlit_folium import st_folium
 import io, zipfile, os, re
 import pandas as pd
-import geopandas as gpd # Hinzugefügt für bessere Performance
+import geopandas as gpd
 from collections import defaultdict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+import random
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Cache für OSMNX
 CACHE_DIR = "geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
@@ -20,19 +20,20 @@ ox.settings.cache_folder = f"./{CACHE_DIR}"
 
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 
-# --- 2. LOGIK (HOCHPERFORMANT) ---
+# --- HILFSFUNKTION: FARBEN ---
+def get_random_color():
+    return f"#{random.randint(0, 0xFFFFFF):06x}"
+
+# --- 2. LOGIK ---
 def verarbeite_strasse(strasse):
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        # Erhöhter Radius, um Grenzen besser zu finden
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=1000)
         
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
-            
-            # Robuste Filterung
             if 'name' in gdf.columns:
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
@@ -57,7 +58,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Profi Edition**")
+    st.markdown("Automatisierte Sortierung — **Interaktive Edition**")
 
 st.divider()
 
@@ -89,15 +90,11 @@ if st.session_state.run_processing and strassen_liste:
     results = []
     total = len(strassen_liste)
     
-    # Threads erhöht für schnellere Verarbeitung (Cache nutzt lokale Platte!)
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_street = {executor.submit(verarbeite_strasse, strasse): strasse for strasse in strassen_liste}
-        
         for i, future in enumerate(future_to_street):
             res = future.result()
             results.append(res)
-            
-            # Update Fortschritt
             prog_bar.progress((i + 1) / total)
             status_text.text(f"🔍 {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
 
@@ -111,31 +108,36 @@ if st.session_state.run_processing and strassen_liste:
     if ort_sammlung:
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            
             master_map = folium.Map(location=[50.8, 8.8], zoom_start=11)
+            ort_colors = {ort: get_random_color() for ort in ort_sammlung.keys()}
             
             for ort in sorted(ort_sammlung.keys()):
-                feature_group = folium.FeatureGroup(name=ort)
+                color = ort_colors[ort]
                 geoms_list = []
                 
                 for it in ort_sammlung[ort]:
-                    folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(feature_group)
+                    # --- INTERAKTIVITÄT: TOOLTIP & POPUP ---
+                    geojson = folium.GeoJson(
+                        it["gdf"],
+                        style_function=lambda x, color=color: {'color': color, 'weight': 5, 'opacity': 0.8},
+                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
+                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Gefunden:'])
+                    ).add_to(master_map)
+                    
                     geoms_list.append(it["gdf"])
                 
-                feature_group.add_to(master_map)
-                
-                # --- PROFISCHNITT: Einzelkarte mit GeoPandas Bounds ---
+                # Einzelkarte erstellen
                 m = folium.Map()
                 combined_gdf = gpd.GeoDataFrame(pd.concat(geoms_list), crs=geoms_list[0].crs)
                 for it in ort_sammlung[ort]:
                     folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(m)
                 
-                # Bounds effizient berechnen
                 bounds = combined_gdf.total_bounds
                 m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
                 zip_file.writestr(f"Karte_{ort}.html", m._repr_html_())
             
-            folium.LayerControl().add_to(master_map)
-            zip_file.writestr(f"00_MASTER_UEBERSICHT.html", master_map._repr_html_())
+            zip_file.writestr(f"00_MASTER_UEBERSICHT_INTERAKTIV.html", master_map._repr_html_())
         
         st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
         st.divider()
