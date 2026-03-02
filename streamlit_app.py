@@ -1,52 +1,43 @@
 import streamlit as st
 import osmnx as ox
 import folium
-from streamlit_folium import st_folium
-import io, zipfile, os, re
+import io, re
 import pandas as pd
 import geopandas as gpd
 from collections import defaultdict
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import random
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Cache-Einstellungen
-CACHE_DIR = "geocache"
+CACHE_DIR = "persistent_geocache"
 if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
 ox.settings.use_cache = True
 ox.settings.cache_folder = f"./{CACHE_DIR}"
 
-# Session State Initialisierung
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
-# Farben für Master-Karte
 def get_random_color():
     return f"#{random.randint(0, 0xFFFFFF):06x}"
 
 # --- 2. LOGIK ---
 def verarbeite_strasse(strasse):
-    # Einfache Bereinigung von Abkürzungen
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        # OSMNX holt Daten
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=1000)
         
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
             if 'name' in gdf.columns:
-                # Präziserer Filter
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
                 gdf_f = gdf
 
             if not gdf_f.empty:
-                # Ortsteil-Erkennung
                 ortsteil = "Unbekannter_Ort"
                 cols = ['addr:suburb', 'suburb', 'village', 'hamlet', 'addr:city', 'city']
                 for col in cols:
@@ -65,7 +56,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Reviewed & Stable**")
+    st.markdown("Automatisierte Sortierung — **HTML Single Page Edition**")
 
 st.divider()
 
@@ -105,12 +96,10 @@ if st.session_state.run_processing and strassen_liste:
     results = []
     total = len(strassen_liste)
     
-    # Threading für Geschwindigkeit
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_to_street = {executor.submit(verarbeite_strasse, strasse): strasse for strasse in strassen_liste}
         
         for i, future in enumerate(future_to_street):
-            # ABBRUCH PRÜFEN
             if st.session_state.stop_requested:
                 status_text.warning("Verarbeitung abgebrochen.")
                 break
@@ -120,7 +109,7 @@ if st.session_state.run_processing and strassen_liste:
             prog_bar.progress((i + 1) / total)
             status_text.text(f"🔍 {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
 
-    # --- AUSGABE (Nur wenn nicht abgebrochen) ---
+    # --- AUSGABE (HTML ERSTELLUNG) ---
     if not st.session_state.stop_requested:
         for res in results:
             if res["success"]:
@@ -129,45 +118,45 @@ if st.session_state.run_processing and strassen_liste:
                 fehler_liste.append(res["original"])
 
         if ort_sammlung:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                # Master Karte
-                master_map = folium.Map(location=[50.8, 8.8], zoom_start=11)
-                ort_colors = {ort: get_random_color() for ort in ort_sammlung.keys()}
-                
-                for ort in sorted(ort_sammlung.keys()):
-                    color = ort_colors[ort]
-                    geoms_list = []
-                    
-                    for it in ort_sammlung[ort]:
-                        folium.GeoJson(
-                            it["gdf"],
-                            style_function=lambda x, color=color: {'color': color, 'weight': 5, 'opacity': 0.8},
-                            tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
-                            popup=folium.GeoJsonPopup(fields=['name'], aliases=['Gefunden:'])
-                        ).add_to(master_map)
-                        geoms_list.append(it["gdf"])
-                    
-                    # Einzelkarte für den Ortsteil
-                    if geoms_list:
-                        m = folium.Map()
-                        combined_gdf = gpd.GeoDataFrame(pd.concat(geoms_list), crs=geoms_list[0].crs)
-                        for it in ort_sammlung[ort]:
-                            folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(m)
-                        
-                        bounds = combined_gdf.total_bounds
-                        m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
-                        zip_file.writestr(f"Karte_{ort}.html", m._repr_html_())
-                
-                # Master in ZIP
-                zip_file.writestr(f"00_MASTER_UEBERSICHT_INTERAKTIV.html", master_map._repr_html_())
+            # Hauptkarte erstellen
+            master_map = folium.Map(location=[50.8, 8.8], zoom_start=11)
+            ort_colors = {ort: get_random_color() for ort in ort_sammlung.keys()}
             
-            st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
+            for ort in sorted(ort_sammlung.keys()):
+                color = ort_colors[ort]
+                
+                # --- NEU: EIGENE EBENE (FeatureGroup) FÜR JEDEN ORT ---
+                feature_group = folium.FeatureGroup(name=ort)
+                
+                for it in ort_sammlung[ort]:
+                    folium.GeoJson(
+                        it["gdf"],
+                        style_function=lambda x, color=color: {'color': color, 'weight': 5, 'opacity': 0.8},
+                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
+                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Gefunden:'])
+                    ).add_to(feature_group)
+                
+                feature_group.add_to(master_map)
+            
+            # LayerControl für Ebenen hinzufügen
+            folium.LayerControl().add_to(master_map)
+            
+            # HTML Daten generieren
+            html_data = master_map._repr_html_()
+            
+            st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile auf der Karte.")
             st.divider()
-            st.download_button("📥 ZIP: Alle Karten & Master", zip_buffer.getvalue(), f"INTEGRAL_Pro.zip")
+            
+            # HTML DOWNLOAD BUTTON
+            st.download_button(
+                label="📥 Download Interaktive Karte (.html)",
+                data=html_data,
+                file_name=f"INTEGRAL_Map_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html"
+            )
         
         if fehler_liste:
             st.error(f"Konnte {len(fehler_liste)} Straßen nicht finden.")
-            st.download_button("⚠️ Unlösbare Fälle", "\n".join(fehler_liste), "fehler.txt")
+            st.download_button("⚠️ Liste fehlender Straßen", "\n".join(fehler_liste), "fehler.txt")
 
     st.session_state.run_processing = False
