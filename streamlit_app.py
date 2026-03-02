@@ -11,7 +11,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-007" 
+SERIAL_NUMBER = "SN-009" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -100,27 +100,25 @@ with st.sidebar:
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
 # --- FUNKTION (MIT HAUSNUMMERN-SUPPORT) ---
-def verarbeite_strasse(strasse):
-    if not strasse: return {"success": False}
+def verarbeite_strasse(strasse_input):
+    if not strasse_input: return {"success": False}
     
-    # Hausnummer-Erkennung
-    hnr = None
-    # Sucht nach einer Zahl am Ende, optional mit Buchstabe (z.B. "12a")
-    hnr_match = re.search(r'(\d+[a-zA-Z]?)$', strasse.strip())
-    if hnr_match:
-        hnr = hnr_match.group(1)
-        strasse_name = strasse.replace(hnr_match.group(0), '').strip()
+    # Trennung von Straße und Hausnummer aus dem Speicherformat "Straße | Nummer"
+    if " | " in strasse_input:
+        parts = strasse_input.split(" | ")
+        strasse_name = parts[0]
+        hnr = parts[1]
     else:
-        strasse_name = strasse.strip()
+        strasse_name = strasse_input
+        hnr = None
 
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_name).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
+        # Finde Straße
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
-        if not gdf.empty and 'name' in gdf.columns:
-            gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
-
+        
         marker_coords = None
         if hnr and not gdf.empty:
             # Versuche präzise Hausnummer zu finden
@@ -145,25 +143,25 @@ def verarbeite_strasse(strasse):
                         ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
                 except: pass
             
-            # Speicher den Originalnamen inkl. Hausnummer
+            # Speicher das kombinierte Format
             return {
                 "gdf": gdf, 
                 "ort": ortsteil, 
                 "name": osm_name, 
-                "original": strasse, # Das ist wichtig für die Excel-Tabelle
+                "original": strasse_input, # Format "Name | Nummer"
                 "marker": marker_coords, 
                 "success": True
             }
     except:
         pass
-    return {"success": False, "original": strasse}
+    return {"success": False, "original": strasse_input}
 
 # --- 3. UI ---
 col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V8.0 (Live Validation {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.0 (SplitInput {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -182,35 +180,43 @@ with col_in1:
     
     st.subheader("🔍 Straßensuche (Live-Prüfung)")
     
-    # --- TEXTINPUT FÜR ECHTZEIT ---
-    query_input = st.text_input("Name der Straße + Hausnummer:", placeholder="z.B. 'Am Markt 12'...")
+    # --- GETRENTE INPUTS ---
+    col_str, col_hnr = st.columns([3, 1])
+    with col_str:
+        query_street = st.text_input("Name der Straße:", placeholder="z.B. Am Markt")
+    with col_hnr:
+        query_hnr = st.text_input("Nr.:", placeholder="12a")
     
-    # --- ONLINE-VALIDIERUNG (ECHTZEIT) ---
+    # Kombinierte Suche für die Validierung
+    combined_query = f"{query_street} {query_hnr}".strip()
+    
+    # --- ONLINE-VALIDIERUNG ---
     selected_suggestion = None
-    if query_input and len(query_input) > 2:
+    if len(query_street) > 2:
         with st.spinner("Prüfe Schreibweise..."):
             try:
-                # Suche nach ähnlichen Namen im Landkreis
-                results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
+                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=10, timeout=5)
                 if results:
-                    # Extrahiere nur den Straßennamen
-                    st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
-                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden (Vorschläge):", st.session_state.online_suggestions)
+                    st.session_state.online_suggestions = [r.address for r in results]
+                    selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
                 else:
-                    st.write("Keine Übereinstimmung im Internet gefunden.")
+                    st.write("Keine Übereinstimmung gefunden.")
             except:
-                st.write("Fehler bei der Online-Prüfung.")
+                st.write("Fehler bei der Prüfung.")
 
     # --- NUR DER SUBMIT-BUTTON IM FORM ---
-    with st.form("manual_add_form"):
+    with st.form("manual_add_form", clear_on_submit=False):
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
         
         if submit_btn and selected_suggestion:
-            if selected_suggestion not in st.session_state.saved_manual_streets:
-                st.session_state.saved_manual_streets.append(selected_suggestion)
+            # Speichere im Format "Name | Nummer"
+            street_to_save = f"{selected_suggestion.split(',')[0]} | {query_hnr}".strip(" |")
+            
+            if street_to_save not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(street_to_save)
                 save_streets(st.session_state.saved_manual_streets)
-                st.success(f"Hinzugefügt (validiert): {selected_suggestion}")
-                st.rerun()
+                st.success(f"Hinzugefügt: {street_to_save}")
+                # st.rerun() # Nicht zwingend nötig mit dem fix
 
 with col_in2: 
     st.subheader("📝 Eingabeliste (Gespeichert)")
@@ -218,9 +224,8 @@ with col_in2:
     # --- AKTUALISIERUNGS-BUTTON ---
     if st.button("🔄 Liste aktualisieren"):
         st.session_state.saved_manual_streets = load_streets()
-        st.rerun()
         
-    # Zeige die gespeicherten Straßen an
+    # Zeige die gespeicherten Straßen an (schön formatiert)
     display_text = "\n".join(st.session_state.saved_manual_streets)
     st.text_area("Straßenliste", 
                  value=display_text,
@@ -291,7 +296,7 @@ if st.session_state.ort_sammlung:
             if item.get("marker"):
                 folium.Marker(
                     location=item["marker"],
-                    popup=f"Hausnummer: {item['original']}",
+                    popup=f"Adresse: {item['original']}",
                     icon=folium.Icon(color="blue", icon="info-sign")
                 ).add_to(marker_fg)
                 
