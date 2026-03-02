@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-038" 
+SERIAL_NUMBER = "SN-040" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -79,9 +79,8 @@ if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
-if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
-if 'show_markers' not in st.session_state: st.session_state.show_markers = False
 if 'suggestion_map' not in st.session_state: st.session_state.suggestion_map = {}
+if 'show_markers' not in st.session_state: st.session_state.show_markers = False
 
 # Hintergrundfarbe & Style
 st.markdown("""
@@ -95,10 +94,9 @@ st.markdown("""
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # --- PAUSE ---
-    time.sleep(random.uniform(0.3, 0.7))
+    # --- PAUSE HÖHER: SCHUTZ VOR 429 FEHLER ---
+    time.sleep(random.uniform(0.5, 1.0))
     
-    # NEU: Extrahiere Name und Hausnummer aus dem Speicherformat "Name | HNR"
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
         strasse_name = parts[0].strip()
@@ -107,34 +105,27 @@ def verarbeite_strasse(strasse_input):
         strasse_name = strasse_input.strip()
         hnr = None
 
-    # Suche nach der Straße
     query = f"{strasse_name}, Marburg-Biedenkopf"
     
     try:
-        # 1. Finde die Geometrie der Straße
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=100) # Distanz hoch
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
 
-        # 2. Filtere auf den exakten Namen (Case Insensitive)
         gdf = gdf[gdf['name'].str.contains(re.escape(strasse_name), case=False, na=False)]
         
         if gdf.empty:
             return {"success": False, "original": strasse_input}
 
-        # --- PRÄZISERE MARKER-LOGIK (NUR BEI HNR) ---
         marker_coords = None
         if hnr:
-            # Suche genau nach der Adresse für den Marker
             loc = geolocator.geocode(f"{strasse_name} {hnr}, Marburg-Biedenkopf", timeout=10)
             if loc:
                 marker_coords = (loc.latitude, loc.longitude)
 
-        # 3. Ortsteil bestimmen
         gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
         
-        # OSM Name als Referenz
         osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else strasse_name
         
         ortsteil = "Unbekannt"
@@ -158,8 +149,9 @@ def verarbeite_strasse(strasse_input):
             "marker": marker_coords, 
             "success": True
         }
-    except:
+    except Exception as e:
         pass
+        
     return {"success": False, "original": strasse_input}
 
 # --- 3. UI LAYOUT ---
@@ -172,21 +164,17 @@ with st.sidebar:
     st.divider()
     
     st.subheader("🔍 Einzelne Straße suchen")
-    col_s1, col_s2 = st.columns([3, 1])
-    with col_s1: query_street = st.text_input("Name:", placeholder="Am Markt")
-    with col_s2: query_hnr = st.text_input("Nr.:", placeholder="12a")
     
-    combined_query = f"{query_street} {query_hnr}".strip()
+    # --- AUTO-COMPLETE IMPLEMENTIERUNG ---
+    query_input = st.text_input("Adresse eingeben (Strasse + Nr):", placeholder="Ringstr 10")
     
-    # Suggestion Handling
-    if len(query_street) > 2:
-        with st.spinner("Prüfe Adresse..."):
+    if len(query_input) > 3:
+        with st.spinner("Suche..."):
             try:
-                results = geolocator.geocode(f"{combined_query}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
+                results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
                 if results:
-                    # Map suggestion string to full result object
                     st.session_state.suggestion_map = {r.address: r for r in results}
-                    selected_address = st.selectbox("Gefundene Adressen:", list(st.session_state.suggestion_map.keys()))
+                    selected_address = st.selectbox("Vorschläge:", list(st.session_state.suggestion_map.keys()))
                 else:
                     st.write("Keine Übereinstimmung.")
                     st.session_state.suggestion_map = {}
@@ -200,11 +188,10 @@ with st.sidebar:
     if st.button("➕ Straße hinzufügen", use_container_width=True):
         if selected_address and selected_address in st.session_state.suggestion_map:
             res = st.session_state.suggestion_map[selected_address]
-            
-            # --- PARSE NAME AND HNR DIRECTLY FROM NOMINATIM IF POSSIBLE ---
-            # Nominatim separates this relatively well in the 'raw' data
             raw = res.raw.get('address', {})
-            street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or res.address.split(',')[0]
+            
+            # Extrahiere strukturierte Daten
+            street_found = raw.get('road') or raw.get('pedestrian') or raw.get('cycleway') or selected_address.split(',')[0]
             hnr_found = raw.get('house_number', "")
             
             street_to_save = f"{street_found} | {hnr_found}".strip(" |")
