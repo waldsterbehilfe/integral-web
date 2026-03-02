@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-014" 
+SERIAL_NUMBER = "SN-015" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -108,6 +108,9 @@ st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_h
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
+    # Zufällige kurze Pause, um 429er Fehler zu vermeiden
+    time.sleep(random.uniform(0.1, 0.4))
+    
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
         strasse_name = parts[0]
@@ -163,7 +166,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.5 (LoadingSpinner {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.6 (429Handler {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -202,7 +205,11 @@ with col_in1:
                 else:
                     st.write("Keine Übereinstimmung gefunden.")
             except Exception as e:
-                st.error(f"Fehler bei der Online-Prüfung: Bitte prüfen Sie Ihre Verbindung oder versuchen Sie es gleich erneut. (Fehler: {e})")
+                # Spezialbehandlung für 429
+                if "429" in str(e):
+                    st.error("Too Many Requests: Der Server ist überlastet. Bitte warten Sie 10 Sekunden und versuchen es erneut.")
+                else:
+                    st.error(f"Fehler bei der Online-Prüfung: {e}")
 
     with st.form("manual_add_form", clear_on_submit=False):
         submit_btn = st.form_submit_button("➕ Straße hinzufügen")
@@ -257,7 +264,8 @@ if st.session_state.run_processing and strassen_liste:
         st_text = st.empty()
         total = len(strassen_liste)
         
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # Reduzierte Workeranzahl, um 429er zu vermeiden
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
             for i, future in enumerate(futures):
                 if st.session_state.stop_requested: break
