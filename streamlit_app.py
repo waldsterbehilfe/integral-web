@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-046" 
+SERIAL_NUMBER = "SN-047" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -279,9 +279,8 @@ if st.session_state.ort_sammlung:
         for ort, items in st.session_state.ort_sammlung.items():
             res_data.append({"Ortsteil": ort, "Anzahl": len(items), "Farbe": st.session_state.ort_colors.get(ort, "#FFFFFF")})
         
-        st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True, column_config={
-            "Farbe": st.column_config.ColorColumn("Farbe")
-        })
+        # FIX: Einfache Anzeige der Farbe als Text, falls ColorColumn nicht existiert
+        st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True)
 
         # Downloads
         st.markdown("---")
