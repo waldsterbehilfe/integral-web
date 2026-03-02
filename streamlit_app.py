@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-023" 
+SERIAL_NUMBER = "SN-024" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -81,8 +81,8 @@ st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_h
 def verarbeite_strasse(strasse_input):
     if not strasse_input: return {"success": False}
     
-    # --- OPTIMIERUNG: Längere Pause ---
-    time.sleep(random.uniform(0.5, 1.0))
+    # --- OPTIMIERUNG: Längere Pause zur Server-Schonung ---
+    time.sleep(random.uniform(0.8, 1.5))
     
     if " | " in strasse_input:
         parts = strasse_input.split(" | ")
@@ -146,7 +146,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.14 (UI CleanUp {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.15 (ProgressFix {SERIAL_NUMBER})**")
 
 st.divider()
 
@@ -297,10 +297,10 @@ if st.session_state.run_processing and strassen_liste:
                 else:
                     temp_err.append(res.get("original", "Unbekannt"))
                 
-                # --- FORTSCHRITTANZEIGE ---
+                # --- VERBESSERTE FORTSCHRITTANZEIGE "X/Y Straßen" ---
                 current_progress = (i + 1) / total
                 pb.progress(current_progress)
-                st_text.text(f"🔍 Fortschritt: {i+1} von {total} — Verarbeite: {res.get('name', '...')}")
+                st_text.text(f"🔍 Fortschritt: {i+1}/{total} Straßen — Verarbeite: {res.get('name', '...')}")
 
     if not st.session_state.stop_requested:
         st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
