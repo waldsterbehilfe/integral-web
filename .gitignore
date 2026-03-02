@@ -1,0 +1,16 @@
+# Cache-Ordner von INTEGRAL PRO (verhindert das Zumüllen)
+persistent_geocache/
+geocache/
+
+# Python Systemdateien
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Lokale Konfigurationen & Logs
+.streamlit/
+*.log
+
+# Betriebssystem-Müll
+.DS_Store
+Thumbs.db
