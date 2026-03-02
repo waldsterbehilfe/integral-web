@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-028" 
+SERIAL_NUMBER = "SN-029" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
@@ -157,7 +157,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V9.19 (DependencyFix {SERIAL_NUMBER})**")
+    st.markdown(f"Automatisierte Sortierung — **V9.20 (Confirmed {SERIAL_NUMBER})**")
 
 st.divider()
 
