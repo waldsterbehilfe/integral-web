@@ -9,7 +9,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-LIVE"
+SERIAL_NUMBER = "SN-029-GOLD3002-FINAL-FIX"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_pro_live_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_pro_final_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. ROBUSTE PERSISTENZ ---
 def load_streets():
@@ -30,7 +30,6 @@ def load_streets():
             lines = [l.strip() for l in f.readlines() if l.strip()]
             return sorted(list(set(lines)))
     except Exception as e:
-        st.error(f"Fehler beim Laden: {e}")
         return []
 
 def save_streets_safely(streets_list):
@@ -44,7 +43,7 @@ def save_streets_safely(streets_list):
         else:
             os.rename(temp_name, STREETS_FILE)
     except Exception as e:
-        st.error(f"Kritischer Fehler beim Speichern: {e}")
+        st.error(f"Speicherfehler: {e}")
 
 # --- 3. LOGIK-FUNKTIONEN ---
 def intelligent_parse(line):
@@ -70,7 +69,7 @@ def validate_street_smart(input_street, cache_list):
             addr = location.raw.get('address', {})
             return addr.get('road') or addr.get('pedestrian') or input_street
     except:
-        time.sleep(1)
+        pass
     return input_street
 
 # --- 4. SESSION STATE ---
@@ -82,20 +81,19 @@ if 'stop_requested' not in st.session_state:
     st.session_state.stop_requested = False
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
+if 'last_upload_count' not in st.session_state:
+    st.session_state.last_upload_count = 0
 
 # --- 5. UI: IMPORT & INPUT ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Status: {SERIAL_NUMBER} | Geladen: {len(st.session_state.saved_manual_streets)} Einträge")
+st.caption(f"Version: {SERIAL_NUMBER} | Einträge: {len(st.session_state.saved_manual_streets)}")
 
-# Der Uploader wurde nach oben geschoben für sofortige Reaktion
 with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
-    up = st.file_uploader("*.txt Dateien auswählen", type=["txt"], accept_multiple_files=True, key="file_up")
+    up = st.file_uploader("*.txt Dateien auswählen", type=["txt"], accept_multiple_files=True)
     
-    # Sofortige Verarbeitung bei Upload
     if up:
         new_entries = []
         for f in up:
-            # Buffer auslesen und decodieren
             content = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
             for l in content:
                 if l.strip():
@@ -103,34 +101,45 @@ with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
                     new_entries.append(f"{s_name} | {h_num}".strip(" |"))
         
         if new_entries:
-            # Dubletten vermeiden und mit bestehender Liste mischen
-            current_list = st.session_state.saved_manual_streets
-            combined = list(set(current_list + new_entries))
-            st.session_state.saved_manual_streets = sorted(combined)
-            save_streets_safely(st.session_state.saved_manual_streets)
-            # WICHTIG: Sofortiger Rerun für die Anzeige
-            st.rerun()
+            # Zusammenführen ohne Dubletten
+            current = set(st.session_state.saved_manual_streets)
+            added = 0
+            for e in new_entries:
+                if e not in current:
+                    st.session_state.saved_manual_streets.append(e)
+                    current.add(e)
+                    added += 1
+            
+            if added > 0:
+                st.session_state.saved_manual_streets.sort()
+                save_streets_safely(st.session_state.saved_manual_streets)
+                st.success(f"{added} neue Einträge hinzugefügt!")
+                st.rerun()
 
     c1, c2, c3 = st.columns([3, 1, 1])
-    m_s = c1.text_input("Straße", key="manual_s")
-    m_h = c2.text_input("Hnr", key="manual_h")
+    m_s = c1.text_input("Straße", key="manual_s_in")
+    m_h = c2.text_input("Hnr", key="manual_h_in")
     if c3.button("Hinzufügen", use_container_width=True):
         if m_s:
             entry = f"{m_s} | {m_h}".strip(" |")
             if entry not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(entry)
+                st.session_state.saved_manual_streets.sort()
                 save_streets_safely(st.session_state.saved_manual_streets)
                 st.rerun()
 
 # --- 6. LISTE & STEUERUNG ---
 with st.container(border=True):
-    # Tabelle greift direkt auf den aktuellen session_state zu
-    df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-    ed_df = st.data_editor(df_list, use_container_width=True, num_rows="dynamic", height=250, key="editor")
+    # Wir erzeugen einen DataFrame direkt aus dem State
+    df_display = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
+    
+    # Key ändert sich bei jeder State-Änderung, um Refresh zu erzwingen
+    editor_key = f"editor_{len(st.session_state.saved_manual_streets)}"
+    ed_df = st.data_editor(df_display, use_container_width=True, num_rows="dynamic", height=250, key=editor_key)
     
     col_btn1, col_btn2, col_btn3 = st.columns(3)
     if col_btn1.button("💾 Liste sichern", use_container_width=True):
-        st.session_state.saved_manual_streets = ed_df["Eintrag"].tolist()
+        st.session_state.saved_manual_streets = sorted(list(set(ed_df["Eintrag"].tolist())))
         save_streets_safely(st.session_state.saved_manual_streets)
         st.rerun()
     if col_btn2.button("🗑️ Liste leeren", use_container_width=True):
