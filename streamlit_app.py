@@ -12,12 +12,42 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-051" 
+SERIAL_NUMBER = "SN-053" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
 
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
+
+# --- THEME SWITCHER (INTEGRAL DESIGN) ---
+st.sidebar.title("Einstellungen")
+theme = st.sidebar.toggle("Dark Mode", value=False)
+
+# Farben Integral Design
+if theme:
+    # DARK MODE
+    bg_color = "#0E1117"
+    text_color = "#FAFAFA"
+    box_bg = "#1E232B"
+    border_color = "#31333F"
+    accent_color = "#1E88E5" # Integral Blau für Dark
+else:
+    # LIGHT MODE (Integral Design)
+    bg_color = "#FFFFFF"
+    text_color = "#333333"
+    box_bg = "#F0F2F6"
+    border_color = "#CCCCCC"
+    accent_color = "#004A99" # Integral Blau für Light
+
+st.markdown(f"""
+<style>
+    .stApp {{background-color: {bg_color}; color: {text_color};}}
+    .block-container {{padding-top: 1rem;}}
+    h1, h2, h3 {{color: {accent_color} !important;}}
+    .step-box {{background-color: {box_bg}; padding: 15px; border-radius: 5px; border: 1px solid {border_color}; margin-bottom: 15px;}}
+    .stButton>button {{background-color: {accent_color}; color: white; border-radius: 5px;}}
+</style>
+""", unsafe_allow_html=True)
 
 # Cache & Verzeichnisse
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,12 +62,11 @@ STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 # --- OPTIMIERUNG: Timeout für geolocator ---
 geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=5)
 
-# --- FESTER FARB-POOL FÜR ORTSTEILE (NEU: Fixiert) ---
+# --- FESTER FARB-POOL FÜR ORTSTEILE ---
 COLORS = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080']
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
-    # Liste bereinigen: Leerzeichen trimmen, Dubletten entfernen
     cleaned_list = sorted(list(set([s.strip() for s in streets_list if s.strip()])))
     with open(STREETS_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(cleaned_list))
@@ -88,17 +117,6 @@ if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual
 if 'suggestion_map' not in st.session_state: st.session_state.suggestion_map = {}
 if 'show_markers' not in st.session_state: st.session_state.show_markers = False
 if 'ort_colors' not in st.session_state: st.session_state.ort_colors = {}
-
-# Hintergrundfarbe & Style
-st.markdown("""
-<style>
-    .stApp {background-color: #0E1117;}
-    .block-container {padding-top: 1rem;}
-    h1 {font-size: 1.5rem !important;}
-    h3 {font-size: 1.1rem !important; margin-bottom: 0.5rem;}
-    .step-box {background-color: #1E232B; padding: 10px; border-radius: 5px; border: 1px solid #31333F; margin-bottom: 10px;}
-</style>
-""", unsafe_allow_html=True)
 
 # --- FUNKTION (MIT STRIKTER FILTERUNG) ---
 def verarbeite_strasse(strasse_input):
@@ -167,7 +185,7 @@ def verarbeite_strasse(strasse_input):
 
 # Top Header
 col_h1, col_h2 = st.columns([1, 10])
-with col_h1: st.image(LOGO_URL, width=80)
+with col_h1: st.image(LOGO_URL, width=120)
 with col_h2: 
     st.title("Integral GIS Dashboard")
     st.markdown(f"Version: {SERIAL_NUMBER} | <span style='color:grey'>Marburg-Biedenkopf</span>", unsafe_allow_html=True)
@@ -179,7 +197,7 @@ if not st.session_state.ort_sammlung:
     with st.container():
         st.markdown("<div class='step-box'>", unsafe_allow_html=True)
         st.subheader("💡 Anleitung")
-        st.markdown("1. Lade eine Straßenliste hoch oder suche einzeln.<br>2. Klicke auf '💾 Speichern & Bereinigen'.<br>3. Starte die Analyse.", unsafe_allow_html=True)
+        st.markdown("1. Lade eine Straßenliste hoch oder suche einzeln.<br>2. Änderungen in der Tabelle werden sofort gespeichert.<br>3. Starte die Analyse.", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
 # --- TOP CONTROL PANEL ---
@@ -187,7 +205,8 @@ with st.container():
     c_col1, c_col2, c_col3, c_col4 = st.columns([2,2,1,1])
     
     with c_col1:
-        query_input = st.text_input("📍 1. Straße suchen:", placeholder="Ringstr 10")
+        st.markdown("**📍 1. Straße suchen**")
+        query_input = st.text_input("Suche:", placeholder="Ringstr 10", label_visibility="collapsed")
         if len(query_input) > 3:
             try:
                 results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
@@ -219,12 +238,12 @@ with st.container():
         if uploaded_file:
             file_streets = [s.strip() for s in uploaded_file.getvalue().decode("utf-8").splitlines() if s.strip()]
             new_list = st.session_state.saved_manual_streets + file_streets
-            # AUTO-BEREINIGUNG HIER
+            # AUTO-BEREINIGUNG
             st.session_state.saved_manual_streets = save_streets(new_list)
             st.rerun()
 
     with c_col3:
-        st.write("**🗑️ Cache**")
+        st.write("**🗑️ Cache & Liste**")
         if st.button("🗑️ Cache leeren", use_container_width=True):
             clear_all_caches()
             st.rerun()
@@ -278,14 +297,14 @@ if st.session_state.ort_sammlung:
     
     with col_res1:
         st.subheader("📊 Ergebnisse")
-        st.session_state.show_markers = st.checkbox("📍 Marker", value=st.session_state.show_markers)
+        st.session_state.show_markers = st.checkbox("📍 Marker anzeigen", value=st.session_state.show_markers)
         
         # Ortsteil Tabelle mit Farben
         res_data = []
         for ort, items in st.session_state.ort_sammlung.items():
             res_data.append({"Ortsteil": ort, "Anzahl": len(items), "Farbe": st.session_state.ort_colors.get(ort, "#FFFFFF")})
         
-        # Anzeige der Farbe und Ortsteil
+        # Anzeige der Tabelle
         df_res = pd.DataFrame(res_data)
         st.dataframe(df_res, use_container_width=True, hide_index=True)
 
@@ -294,7 +313,7 @@ if st.session_state.ort_sammlung:
         col_d1, col_d2 = st.columns(2)
         try:
             excel_data = create_excel_download(st.session_state.ort_sammlung)
-            col_d1.download_button("📥 Excel", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            col_d1.download_button("📥 Excel Export", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         except: pass
         
     with col_res2:
@@ -327,19 +346,24 @@ if st.session_state.ort_sammlung:
         components.html(m._repr_html_(), height=600)
         
         # Download-Button für HTML Karte
-        col_d2.download_button("📥 Map HTML", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
+        col_d2.download_button("📥 Map HTML Export", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
 
 else:
     # --- INTERAKTIVE LISTE ---
-    st.write(f"📝 **3. Liste ({len(st.session_state.saved_manual_streets)})**")
+    st.write(f"📝 **3. Straßenliste ({len(st.session_state.saved_manual_streets)})**")
     
     df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
     
-    # Nutzung von data_editor mit der Möglichkeit Zeilen zu löschen
-    edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True, key="streets_editor")
+    # --- NEU: Data Editor mit Callback für sofortige Speicherung ---
+    edited_df = st.data_editor(
+        df_streets, 
+        num_rows="dynamic", 
+        use_container_width=True, 
+        key="streets_editor",
+        # Diese Funktion wird aufgerufen, wenn sich der Editor ändert
+        on_change=lambda: save_streets(st.session_state.streets_editor["edited_rows"].values() if "edited_rows" in st.session_state.streets_editor else st.session_state.streets_editor["data"]["Adresse (Strasse | Nr)"].tolist())
+    )
     
-    col_l1, col_l2, col_l3 = st.columns(3)
-    if col_l1.button("💾 Speichern & Bereinigen", use_container_width=True):
-        st.session_state.saved_manual_streets = save_streets(edited_df["Adresse (Strasse | Nr)"].tolist())
-        st.success("Gespeichert und sortiert!")
+    # Wir benutzen den on_change callback, der Button "Speichern" ist jetzt optional
+    if st.button("🔄 Liste aktualisieren", use_container_width=True):
         st.rerun()
