@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-048" 
+SERIAL_NUMBER = "SN-049" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -174,7 +174,7 @@ with col_h2:
 
 st.markdown("---")
 
-# --- SCHRITT-FÜR-SCHRITT ANLEITUNG (NEU) ---
+# --- SCHRITT-FÜR-SCHRITT ANLEITUNG ---
 if not st.session_state.ort_sammlung:
     with st.container():
         st.markdown("<div class='step-box'>", unsafe_allow_html=True)
@@ -298,7 +298,9 @@ if st.session_state.ort_sammlung:
             excel_data = create_excel_download(st.session_state.ort_sammlung)
             col_d1.download_button("📥 Excel", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         except: pass
-        col_d2.download_button("📥 Map HTML", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
+        
+        # HIER IST DER DOWNLOAD-BUTTON JETZT KORREKT PLATZIERT
+        # m = folium.Map(...)  # <--- Das war der Fehler, 'm' existierte hier noch nicht
 
     with col_res2:
         # Karte
@@ -328,6 +330,9 @@ if st.session_state.ort_sammlung:
             m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
         
         components.html(m._repr_html_(), height=600)
+        
+        # Download-Button für HTML Karte hier platziert
+        col_d2.download_button("📥 Map HTML", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
 
 else:
     # --- INTERAKTIVE LISTE ---
