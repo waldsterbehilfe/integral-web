@@ -10,11 +10,8 @@ from datetime import datetime
 from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
-# --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-002" 
-
 # --- 1. SETUP & THEME ---
-st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
+st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
@@ -28,7 +25,7 @@ ox.settings.cache_folder = CACHE_DIR
 # --- DATEI FÜR MANUELLE LISTEN ---
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}")
+geolocator = Nominatim(user_agent="integral_pro_v71_permanent")
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
 def save_streets(streets_list):
@@ -46,16 +43,14 @@ if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
+if 'search_results' not in st.session_state: st.session_state.search_results = []
 if 'uploaded_streets' not in st.session_state: st.session_state.uploaded_streets = []
 # Lade gespeicherte Straßen beim Start
 if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
-# Für Vorschläge aus dem Internet
-if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
-    st.markdown(f"**Version:** `{SERIAL_NUMBER}`")
     st.divider()
     selected_colors = {}
     if st.session_state.ort_sammlung:
@@ -139,7 +134,7 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown(f"Automatisierte Sortierung — **V7.7 (Serialized {SERIAL_NUMBER})**")
+    st.markdown("Automatisierte Sortierung — **V7.1 (Permanent Storage)**")
 
 st.divider()
 
@@ -156,38 +151,28 @@ with col_in1:
     else:
         st.session_state.uploaded_streets = []
     
-    st.subheader("🔍 Straßensuche (Online-Prüfung)")
+    # Kombiniere bekannte Straßen für die Suche (aus Datei + gespeichert)
+    known_streets = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
+    known_streets = [s for s in known_streets if s]
     
-    # Formular zur Stabilisierung
-    with st.form("manual_add_form"):
-        query_input = st.text_input("Name der Straße:", placeholder="Straße eingeben (z.B. 'Am Markt')...")
-        
-        # ONLINE-VALIDIERUNG
-        if query_input and len(query_input) > 2:
-            with st.spinner("Prüfe Schreibweise..."):
-                try:
-                    # Suche nach ähnlichen Namen im Landkreis
-                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
-                    if results:
-                        # Extrahiere nur den Straßennamen
-                        st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
-                        selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
-                    else:
-                        selected_suggestion = None
-                        st.write("Keine Übereinstimmung im Internet gefunden.")
-                except:
-                    selected_suggestion = None
-                    st.write("Fehler bei der Online-Prüfung.")
+    st.subheader("🔍 Straßensuche (Lokal)")
+    
+    def local_search_callback():
+        query = st.session_state.search_input
+        if len(query) > 0:
+            st.session_state.search_results = [s for s in known_streets if query.lower() in s.lower()]
         else:
-            selected_suggestion = None
-        
-        submit_btn = st.form_submit_button("➕ Korrekte Straße hinzufügen")
-        
-        if submit_btn and selected_suggestion:
+            st.session_state.search_results = []
+
+    st.text_input("Straße", placeholder="Name eingeben...", key="search_input", on_change=local_search_callback, label_visibility="collapsed")
+    
+    if st.session_state.search_results:
+        selected_suggestion = st.selectbox("Auswahl aus Bekannten:", st.session_state.search_results)
+        if st.button("➕ Hinzufügen"):
             if selected_suggestion not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(selected_suggestion)
                 save_streets(st.session_state.saved_manual_streets)
-                st.success(f"Hinzugefügt (validiert): {selected_suggestion}")
+                st.session_state.search_results = []
                 st.rerun()
 
 with col_in2: 
