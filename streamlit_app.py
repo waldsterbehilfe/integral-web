@@ -3,82 +3,80 @@ import pandas as pd
 import os
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-071" 
+SERIAL_NUMBER = "SN-072" 
 
-# --- 1. SETUP ---
-st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide")
+# --- 1. SETUP & DATEI-CHECK ---
+st.set_page_config(page_title=f"INTEGRAL {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-# --- 2. LOGIK ---
-def load_streets():
+def load_from_file():
     if os.path.exists(STREETS_FILE):
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
-            lines = [l.strip() for l in f.readlines() if l.strip()]
-            return sorted(list(set(lines)))
+            return sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
     return []
 
-def save_streets(streets_list):
-    cleaned = sorted(list(set([str(s).strip() for s in streets_list if str(s).strip()])))
+def save_to_file(data_list):
+    cleaned = sorted(list(set([str(s).strip() for s in data_list if str(s).strip()])))
     with open(STREETS_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(cleaned))
-    st.session_state.saved_manual_streets = cleaned
+    return cleaned
 
-# Initialisierung
-if 'saved_manual_streets' not in st.session_state:
-    st.session_state.saved_manual_streets = load_streets()
+# --- 2. SESSION STATE INITIALISIERUNG ---
+# Wir laden die Daten EINMALIG in den State beim Start
+if 'main_list' not in st.session_state:
+    st.session_state.main_list = load_from_file()
 
-# --- 3. UI ---
+# --- 3. UI HEADER ---
 st.title(f"📍 Integral Dashboard {SERIAL_NUMBER}")
 
-# Import Bereich
-with st.expander("📥 TXT-Import & Einzel-Eingabe", expanded=not st.session_state.saved_manual_streets):
+# Import & Einzel-Eingabe in einem kompakten Block
+with st.container():
     c1, c2 = st.columns([2, 1])
     with c1:
-        up = st.file_uploader("Datei wählen oder Drag&Drop", type=["txt"])
+        up = st.file_uploader("Datei laden (Drag & Drop)", type=["txt"], key="uploader")
         if up:
-            new_content = [s.strip() for s in up.getvalue().decode("utf-8").splitlines() if s.strip()]
-            # FIX: Wir löschen den Editor-State im Hintergrund, damit er sich neu aufbauen MUSS
-            if "streets_editor" in st.session_state:
-                del st.session_state["streets_editor"]
-            save_streets(st.session_state.saved_manual_streets + new_content)
+            new_lines = [s.strip() for s in up.getvalue().decode("utf-8").splitlines() if s.strip()]
+            # Update State & Datei
+            st.session_state.main_list = save_to_file(st.session_state.main_list + new_lines)
             st.rerun()
-
     with c2:
-        new_entry = st.text_input("Einzelne Straße hinzufügen")
-        if st.button("Hinzufügen"):
-            if new_entry:
-                if "streets_editor" in st.session_state:
-                    del st.session_state["streets_editor"]
-                save_streets(st.session_state.saved_manual_streets + [new_entry])
-                st.rerun()
+        new_val = st.text_input("Manuelle Eingabe", placeholder="Straße 123", key="manual_add")
+        if st.button("➕ Hinzufügen") and new_val:
+            st.session_state.main_list = save_to_file(st.session_state.main_list + [new_val])
+            st.rerun()
 
 st.markdown("---")
 
-# Die Tabelle - JETZT STABIL
-st.subheader(f"📝 Aktuelle Straßenliste ({len(st.session_state.saved_manual_streets)})")
+# --- 4. DER TABELLEN-EDITOR (DER KRITISCHE TEIL) ---
+st.subheader(f"📝 Aktuelle Liste ({len(st.session_state.main_list)})")
 
-# Wir nutzen eine Kopie der Daten für den Editor
-df_editor = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
+# Wir bauen das DataFrame direkt aus dem State
+df = pd.DataFrame(st.session_state.main_list, columns=["Adresse (Strasse | Nr)"])
 
-# Der Editor ohne komplexen Key-Schnickschnack, aber mit manuellem State-Reset (siehe oben)
+# Wir nutzen KEINEN festen Key für den Editor, damit er bei jedem rerun() 
+# mit den Daten aus 'df' neu initialisiert wird.
 edited_df = st.data_editor(
-    df_editor, 
+    df, 
     num_rows="dynamic", 
-    use_container_width=True, 
-    key="streets_editor"
+    use_container_width=True,
+    key=f"editor_v72_{len(st.session_state.main_list)}" # Trick: Key ändert sich bei Längenänderung
 )
 
-# Speichern nur, wenn sich wirklich der Inhalt geändert hat
-if not edited_df.equals(df_editor):
-    save_streets(edited_df["Adresse (Strasse | Nr)"].tolist())
+# Prüfen auf manuelle Änderungen in der Tabelle
+if not edited_df.equals(df):
+    st.session_state.main_list = save_to_file(edited_df["Adresse (Strasse | Nr)"].tolist())
     st.rerun()
 
-# Reset Button
-if st.button("🚨 LISTE LEEREN"):
-    if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
-    if "streets_editor" in st.session_state:
-        del st.session_state["streets_editor"]
-    st.session_state.saved_manual_streets = []
-    st.rerun()
+# --- 5. AKTIONEN ---
+st.write("##")
+col_a, col_b = st.columns(2)
+with col_a:
+    if st.button("🚀 ANALYSE STARTEN", type="primary", use_container_width=True):
+        st.success("Analyse bereit. (Geodaten-Modul folgt im nächsten Schritt)")
+with col_b:
+    if st.button("🚨 LISTE LEEREN", use_container_width=True):
+        if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+        st.session_state.main_list = []
+        st.rerun()
