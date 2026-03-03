@@ -1,48 +1,56 @@
 import streamlit as st
 import osmnx as ox
 import folium
-from streamlit_folium import st_folium
-import io, zipfile, os, re
+import io, re, os, random
 import pandas as pd
 import geopandas as gpd
 from collections import defaultdict
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-import random
+from datetime import datetime
 
-# --- 1. SETUP ---
+# --- 1. SETUP & PERSISTENTER CACHE ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-CACHE_DIR = "geocache"
-if not os.path.exists(CACHE_DIR): os.makedirs(CACHE_DIR)
+# Pfade für Cloud-Kompatibilität
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "persistent_geocache")
+
+try:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+except OSError as e:
+    st.error(f"Cache-Fehler: {e}")
+
 ox.settings.use_cache = True
-ox.settings.cache_folder = f"./{CACHE_DIR}"
+ox.settings.cache_folder = CACHE_DIR
 
+# Session States
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
+if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
-# --- HILFSFUNKTION: FARBEN ---
 def get_random_color():
     return f"#{random.randint(0, 0xFFFFFF):06x}"
 
 # --- 2. LOGIK ---
 def verarbeite_strasse(strasse):
+    # Reinigung: 'str.' oder 'str' am Ende zu 'Straße'
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
     query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
     
     try:
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=1000)
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
         
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
+            # Filter auf den Namen (enthält den Suchstring)
             if 'name' in gdf.columns:
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
                 gdf_f = gdf
 
             if not gdf_f.empty:
+                # Stadtteil finden
                 ortsteil = "Unbekannter_Ort"
-                cols = ['addr:suburb', 'suburb', 'village', 'hamlet', 'addr:city', 'city']
-                for col in cols:
+                for col in ['addr:suburb', 'suburb', 'village', 'hamlet', 'addr:city']:
                     if col in gdf_f.columns and gdf_f[col].dropna().any():
                         val = str(gdf_f[col].dropna().iloc[0])
                         if "Marburg-Biedenkopf" not in val:
@@ -58,7 +66,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **Interaktive Edition**")
+    st.markdown("Automatisierte Sortierung — **HTML Layer Edition (Gold)**")
 
 st.divider()
 
@@ -68,6 +76,7 @@ with col_in1:
 with col_in2:
     manual_input = st.text_area("Manuelle Eingabe", placeholder="z.B. Schweinsberger Str", height=126)
 
+# Liste zusammenstellen
 strassen_liste = []
 if uploaded_files:
     for f in uploaded_files:
@@ -76,75 +85,82 @@ if manual_input:
     strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
-if st.button("🚀 Analyse starten", type="primary"):
+# Buttons
+col_btn1, col_btn2, _ = st.columns([1, 1, 3])
+if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
+    st.session_state.stop_requested = False
+if col_btn2.button("🛑 Abbruch", type="secondary"):
+    st.session_state.stop_requested = True
 
-# --- VERARBEITUNG ---
+# --- 4. VERARBEITUNG ---
 if st.session_state.run_processing and strassen_liste:
     ort_sammlung = defaultdict(list)
     fehler_liste = []
+    all_geoms = [] # Für den finalen Zoom
     
     prog_bar = st.progress(0)
     status_text = st.empty()
     
-    results = []
-    total = len(strassen_liste)
-    
     with ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_street = {executor.submit(verarbeite_strasse, strasse): strasse for strasse in strassen_liste}
-        for i, future in enumerate(future_to_street):
+        futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
+        for i, future in enumerate(futures):
+            if st.session_state.stop_requested:
+                status_text.warning("⏹️ Verarbeitung gestoppt.")
+                break
+            
             res = future.result()
-            results.append(res)
-            prog_bar.progress((i + 1) / total)
-            status_text.text(f"🔍 {res['name'] if res['success'] else res['original']} ({i+1}/{total})")
+            if res["success"]:
+                ort_sammlung[res["ort"]].append(res)
+                all_geoms.append(res["gdf"])
+            else:
+                fehler_liste.append(res["original"])
+            
+            prog_bar.progress((i + 1) / len(strassen_liste))
+            status_text.text(f"🔍 {res.get('name', res.get('original'))} ({i+1}/{len(strassen_liste)})")
 
-    # --- AUSGABE ---
-    for res in results:
-        if res["success"]:
-            ort_sammlung[res["ort"]].append(res)
-        else:
-            fehler_liste.append(res["original"])
-
-    if ort_sammlung:
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            
-            master_map = folium.Map(location=[50.8, 8.8], zoom_start=11)
-            ort_colors = {ort: get_random_color() for ort in ort_sammlung.keys()}
-            
-            for ort in sorted(ort_sammlung.keys()):
-                color = ort_colors[ort]
-                geoms_list = []
-                
-                for it in ort_sammlung[ort]:
-                    # --- INTERAKTIVITÄT: TOOLTIP & POPUP ---
-                    geojson = folium.GeoJson(
-                        it["gdf"],
-                        style_function=lambda x, color=color: {'color': color, 'weight': 5, 'opacity': 0.8},
-                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
-                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Gefunden:'])
-                    ).add_to(master_map)
-                    
-                    geoms_list.append(it["gdf"])
-                
-                # Einzelkarte erstellen
-                m = folium.Map()
-                combined_gdf = gpd.GeoDataFrame(pd.concat(geoms_list), crs=geoms_list[0].crs)
-                for it in ort_sammlung[ort]:
-                    folium.GeoJson(it["gdf"], style_function=lambda x: {'color':'red', 'weight':6}).add_to(m)
-                
-                bounds = combined_gdf.total_bounds
-                m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]], padding=(0.05, 0.05))
-                zip_file.writestr(f"Karte_{ort}.html", m._repr_html_())
-            
-            zip_file.writestr(f"00_MASTER_UEBERSICHT_INTERAKTIV.html", master_map._repr_html_())
+    # --- 5. HTML GENERIERUNG ---
+    if ort_sammlung and not st.session_state.stop_requested:
+        # Basis-Karte (Mittelpunkt wird später angepasst)
+        m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
         
-        st.success(f"Analyse fertig! {len(ort_sammlung)} Ortsteile erkannt.")
-        st.divider()
-        st.download_button("📥 ZIP: Alle Karten", zip_buffer.getvalue(), f"INTEGRAL_Pro.zip")
-    
-    if fehler_liste:
-        st.error(f"Konnte {len(fehler_liste)} Straßen nicht finden.")
-        st.download_button("⚠️ Unlösbare Fälle", "\n".join(fehler_liste), "fehler.txt")
+        for ort in sorted(ort_sammlung.keys()):
+            color = get_random_color()
+            # FeatureGroup ist die "Ebene"
+            fg = folium.FeatureGroup(name=f"📍 {ort} ({len(ort_sammlung[ort])} Str.)")
+            
+            for item in ort_sammlung[ort]:
+                folium.GeoJson(
+                    item["gdf"],
+                    style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
+                    tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
+                    popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
+                ).add_to(fg)
+            fg.add_to(m)
+        
+        folium.LayerControl(collapsed=False).add_to(m)
+        
+        # Automatischer Zoom auf alle Straßen
+        if all_geoms:
+            combined = gpd.GeoDataFrame(pd.concat(all_geoms))
+            b = combined.total_bounds # [minx, miny, maxx, maxy]
+            m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
+        st.success(f"✅ Fertig! {len(ort_sammlung)} Ortsteile/Ebenen erstellt.")
+        
+        # Download
+        html_string = m._repr_html_()
+        st.download_button(
+            label="📥 Interaktive Karte herunterladen",
+            data=html_string,
+            file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
+            mime="text/html"
+        )
+
+    if fehler_liste and not st.session_state.stop_requested:
+        with st.expander("⚠️ Nicht gefundene Straßen"):
+            st.write(", ".join(fehler_liste))
+
+    # Reset
     st.session_state.run_processing = False
+    st.session_state.stop_requested = False
