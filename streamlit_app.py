@@ -9,7 +9,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-FIXED"
+SERIAL_NUMBER = "SN-029-GOLD3002-LIVE"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_pro_fixed_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_pro_live_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. ROBUSTE PERSISTENZ ---
 def load_streets():
@@ -34,7 +34,6 @@ def load_streets():
         return []
 
 def save_streets_safely(streets_list):
-    """Schreibt Daten atomar, um Datenverlust zu verhindern."""
     unique_streets = sorted(list(set([s.strip() for s in streets_list if s.strip()])))
     try:
         with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8-sig', dir=BASE_DIR) as tf:
@@ -88,38 +87,46 @@ if 'ort_sammlung' not in st.session_state:
 st.title("🚀 INTEGRAL PRO")
 st.caption(f"Status: {SERIAL_NUMBER} | Geladen: {len(st.session_state.saved_manual_streets)} Einträge")
 
+# Der Uploader wurde nach oben geschoben für sofortige Reaktion
 with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
-    up = st.file_uploader("TXT-Dateien wählen", type=["txt"], accept_multiple_files=True)
+    up = st.file_uploader("*.txt Dateien auswählen", type=["txt"], accept_multiple_files=True, key="file_up")
+    
+    # Sofortige Verarbeitung bei Upload
     if up:
         new_entries = []
         for f in up:
-            lines = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
-            for l in lines:
+            # Buffer auslesen und decodieren
+            content = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
+            for l in content:
                 if l.strip():
-                    # Wir parsen und formatieren direkt beim Import für Konsistenz
                     s_name, h_num = intelligent_parse(l)
                     new_entries.append(f"{s_name} | {h_num}".strip(" |"))
         
         if new_entries:
-            combined = list(set(st.session_state.saved_manual_streets + new_entries))
+            # Dubletten vermeiden und mit bestehender Liste mischen
+            current_list = st.session_state.saved_manual_streets
+            combined = list(set(current_list + new_entries))
             st.session_state.saved_manual_streets = sorted(combined)
             save_streets_safely(st.session_state.saved_manual_streets)
-            st.success(f"{len(new_entries)} Einträge verarbeitet.")
+            # WICHTIG: Sofortiger Rerun für die Anzeige
             st.rerun()
 
     c1, c2, c3 = st.columns([3, 1, 1])
-    m_s = c1.text_input("Straße")
-    m_h = c2.text_input("Hnr")
+    m_s = c1.text_input("Straße", key="manual_s")
+    m_h = c2.text_input("Hnr", key="manual_h")
     if c3.button("Hinzufügen", use_container_width=True):
         if m_s:
-            st.session_state.saved_manual_streets.append(f"{m_s} | {m_h}".strip(" |"))
-            save_streets_safely(st.session_state.saved_manual_streets)
-            st.rerun()
+            entry = f"{m_s} | {m_h}".strip(" |")
+            if entry not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(entry)
+                save_streets_safely(st.session_state.saved_manual_streets)
+                st.rerun()
 
 # --- 6. LISTE & STEUERUNG ---
 with st.container(border=True):
+    # Tabelle greift direkt auf den aktuellen session_state zu
     df_list = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-    ed_df = st.data_editor(df_list, use_container_width=True, num_rows="dynamic", height=250)
+    ed_df = st.data_editor(df_list, use_container_width=True, num_rows="dynamic", height=250, key="editor")
     
     col_btn1, col_btn2, col_btn3 = st.columns(3)
     if col_btn1.button("💾 Liste sichern", use_container_width=True):
