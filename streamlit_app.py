@@ -20,7 +20,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_pro_v6_{random.randint(100,999)}", timeout=10)
+geolocator = Nominatim(user_agent=f"integral_pro_v7_{random.randint(100,999)}", timeout=10)
 
 # --- 2. HILFSFUNKTIONEN ---
 def get_internet_verified(query):
@@ -66,20 +66,21 @@ if uploaded_files:
         with st.status(f"Importiere {total_lines} Einträge...", expanded=True) as status:
             prog_bar = st.progress(0)
             for i, line in enumerate(raw_lines):
-                # Anzeige: X von Y
+                # UI Anzeige: x von y
                 status.write(f"Prüfe Datensatz {i+1} von {total_lines}: `{line}`")
                 
                 # Speed-Check: Wenn exakt im Cache, überspringen
                 if line in st.session_state.saved_manual_streets:
                     new_verified.append(line)
                 else:
-                    # Nur bei unbekannten Daten Internet-Check (mit Spinner)
-                    s_name = line.split("|")[0].strip()
-                    verified_name = get_internet_verified(s_name)
-                    if verified_name:
-                        hnr = line.split("|")[1].strip() if "|" in line else ""
-                        new_verified.append(f"{verified_name} | {hnr}".strip(" |"))
-                        time.sleep(0.8) # Schutz für API
+                    # Nur bei unbekannten Daten Internet-Check (Spinner innerhalb der Schleife nur bei Bedarf)
+                    with st.spinner(f"Geodaten-Abgleich für: {line}"):
+                        s_name = line.split("|")[0].strip()
+                        verified_name = get_internet_verified(s_name)
+                        if verified_name:
+                            hnr = line.split("|")[1].strip() if "|" in line else ""
+                            new_verified.append(f"{verified_name} | {hnr}".strip(" |"))
+                            time.sleep(0.8) # Schutz für API
                 
                 prog_bar.progress((i + 1) / total_lines)
             
@@ -129,34 +130,49 @@ if c_st.button("🛑 STOPP", type="secondary", use_container_width=True):
 if st.session_state.run_processing:
     results = defaultdict(list)
     total_analysis = len(st.session_state.saved_manual_streets)
-    with st.status(f"Berechne Geometrien (0 von {total_analysis})...", expanded=True) as status:
-        p_bar = st.progress(0)
-        for i, s in enumerate(st.session_state.saved_manual_streets):
-            status.write(f"Analysiere {i+1}/{total_analysis}: **{s}**")
-            try:
-                s_name = s.split("|")[0].strip()
-                hnr = s.split("|")[1].strip() if "|" in s else None
-                s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', s_name).strip()
-                gdf = ox.features_from_address(f"{s_cl}, Marburg-Biedenkopf", tags={"highway": True}, dist=50)
-                if not gdf.empty:
-                    gdf = gdf[gdf['name'].str.contains(s_cl, case=False, na=False)].to_crs(epsg=4326)
-                    if not gdf.empty:
-                        m_pos = None
-                        if hnr:
-                            l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
-                            if l: m_pos = (l.latitude, l.longitude)
-                        cent = gdf.geometry.unary_union.centroid
-                        rv = geolocator.reverse((cent.y, cent.x), language='de')
-                        ort = rv.raw.get('address', {}).get('village') or \
-                              rv.raw.get('address', {}).get('suburb') or "Marburg"
-                        results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos})
-            except: pass
-            p_bar.progress((i + 1) / total_analysis)
-            time.sleep(1.1)
-        st.session_state.ort_sammlung = dict(results)
+    
+    if total_analysis == 0:
+        st.warning("Keine Daten zur Analyse vorhanden.")
         st.session_state.run_processing = False
-        status.update(label="Analyse fertig!", state="complete")
-        st.rerun()
+    else:
+        with st.status(f"Berechne Geometrien (0 von {total_analysis})...", expanded=True) as status:
+            p_bar = st.progress(0)
+            for i, s in enumerate(st.session_state.saved_manual_streets):
+                # UI Anzeige: x von y
+                status.write(f"Analysiere {i+1} von {total_analysis}: **{s}**")
+                
+                try:
+                    s_name = s.split("|")[0].strip()
+                    hnr = s.split("|")[1].strip() if "|" in s else None
+                    s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', s_name).strip()
+                    
+                    # Ladespinner während der Geodaten-Abfrage
+                    with st.spinner(f"Lade Kartendaten für {s_cl}..."):
+                        gdf = ox.features_from_address(f"{s_cl}, Marburg-Biedenkopf", tags={"highway": True}, dist=50)
+                        
+                        if not gdf.empty:
+                            gdf = gdf[gdf['name'].str.contains(s_cl, case=False, na=False)].to_crs(epsg=4326)
+                            if not gdf.empty:
+                                m_pos = None
+                                if hnr:
+                                    l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
+                                    if l: m_pos = (l.latitude, l.longitude)
+                                cent = gdf.geometry.unary_union.centroid
+                                rv = geolocator.reverse((cent.y, cent.x), language='de')
+                                ort = rv.raw.get('address', {}).get('village') or \
+                                      rv.raw.get('address', {}).get('suburb') or "Marburg"
+                                results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos})
+                except Exception as e:
+                    pass # Ignore failed lookups gracefully
+                    
+                p_bar.progress((i + 1) / total_analysis)
+                status.update(label=f"Berechne Geometrien ({i+1} von {total_analysis})...")
+                time.sleep(1.0)
+                
+            st.session_state.ort_sammlung = dict(results)
+            st.session_state.run_processing = False
+            status.update(label="✅ Analyse fertig!", state="complete")
+            st.rerun()
 
 # --- 8. KARTE ---
 if st.session_state.ort_sammlung:
