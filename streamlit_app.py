@@ -1,11 +1,12 @@
 import streamlit as st
 import osmnx as ox
 import folium
-import re, os, random, time
+import io, re, os, random
 import pandas as pd
+from collections import defaultdict
 from geopy.geocoders import Nominatim
-from difflib import SequenceMatcher
 import streamlit.components.v1 as components
+import time
 
 # --- 1. SETUP ---
 SERIAL_NUMBER = "SN-029-GOLD3002"
@@ -13,84 +14,85 @@ st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
-# Dynamischer User-Agent gegen API-Sperren
-geolocator = Nominatim(user_agent=f"integral_pro_v5_{random.randint(100,999)}", timeout=10)
+CACHE_DIR = os.path.join(BASE_DIR, "osmnx_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
 
-# --- 2. LOGIK FÜR FEHLERTOLERANZ & VERIFIKATION ---
-def check_similarity(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+ox.settings.use_cache = True
+ox.settings.cache_folder = CACHE_DIR
+# Eindeutiger User-Agent für stabile API-Abfragen
+geolocator = Nominatim(user_agent=f"integral_pro_validator_{random.randint(1000,9999)}", timeout=10)
 
-def get_verified_suggestions(query):
-    """Sucht im Internet und gibt nur existierende Straßen zurück."""
-    try:
-        results = geolocator.geocode(f"{query}, Marburg-Biedenkopf", exactly_one=False, limit=3, addressdetails=True)
-        if results:
-            # Extrahiere nur den reinen Straßennamen aus der Antwort
-            return [r.address.split(',')[0].strip() for r in results]
-    except:
-        pass
-    return []
-
-# --- 3. PERSISTENZ ---
-if 'saved_manual_streets' not in st.session_state:
+# --- 2. HILFSFUNKTIONEN ---
+def load_streets():
     if os.path.exists(STREETS_FILE):
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
-            st.session_state.saved_manual_streets = [l.strip() for l in f.readlines() if l.strip()]
-    else:
-        st.session_state.saved_manual_streets = []
+            return [line.strip() for line in f.readlines() if line.strip()]
+    return []
 
-# --- 4. UI: INPUT MIT VERIFIKATIONS-FILTER ---
-st.title("🚀 INTEGRAL PRO — Verified Cache")
+def save_streets(streets_list):
+    with open(STREETS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(streets_list))
 
+# --- 3. SESSION STATE ---
+if 'saved_manual_streets' not in st.session_state:
+    st.session_state.saved_manual_streets = load_streets()
+if 'run_processing' not in st.session_state:
+    st.session_state.run_processing = False
+
+# --- 4. UI: HEADER ---
+st.title("🚀 INTEGRAL PRO — Intelligent Input")
+st.info(f"**Gespeicherte Straßen:** {len(st.session_state.saved_manual_streets)}")
+
+# --- 5. EINGABE MIT LIVE-ABGLEICH & ZIEL-ANZEIGE ---
 with st.container(border=True):
     col_in, col_list = st.columns([1, 1])
     
     with col_in:
-        st.subheader("📥 Verifizierte Eingabe")
-        m_s = st.text_input("Straßenname (wird geprüft)", key="m_s")
-        m_h = st.text_input("Hnr", key="m_h")
+        st.subheader("📥 Neue Straße prüfen")
+        c1, c2 = st.columns([3, 1])
+        m_s = c1.text_input("Straßenname", key="m_s", placeholder="z.B. Universitätsstraße")
+        m_h = c2.text_input("Hnr", key="m_h", placeholder="7")
         
+        target_found = False
         if m_s:
-            suggestions = get_verified_suggestions(m_s)
-            
-            if suggestions:
-                best_match = suggestions[0]
-                score = check_similarity(m_s, best_match)
-                
-                # FALL A: Exakter Treffer oder sehr hohe Sicherheit (80%+)
-                if score >= 0.8:
-                    st.success(f"✅ Korrektur erkannt: **{best_match}**")
-                    if st.button(f"'{best_match}' verifiziert speichern"):
-                        full = f"{best_match} | {m_h}".strip(" |")
-                        if full not in st.session_state.saved_manual_streets:
-                            st.session_state.saved_manual_streets.append(full)
-                            with open(STREETS_FILE, "w", encoding="utf-8") as f: 
-                                f.write("\n".join(st.session_state.saved_manual_streets))
-                            st.rerun()
-                
-                # FALL B: Mehrere Möglichkeiten (unter 80%)
-                else:
-                    st.warning("⚠️ Nicht eindeutig. Bitte wählen Sie den richtigen Namen:")
-                    for s in suggestions:
-                        if st.button(f"Speichere verifiziert: {s}", key=s):
-                            full = f"{s} | {m_h}".strip(" |")
-                            if full not in st.session_state.saved_manual_streets:
-                                st.session_state.saved_manual_streets.append(full)
-                                with open(STREETS_FILE, "w", encoding="utf-8") as f: 
-                                    f.write("\n".join(st.session_state.saved_manual_streets))
-                                st.rerun()
-            else:
-                st.error("❌ Straße im Internet unbekannt. Speichern blockiert.")
+            try:
+                # Live-Abgleich mit dem Internet
+                with st.spinner("Prüfe Zielort im Internet..."):
+                    check_query = f"{m_s}, Marburg-Biedenkopf"
+                    location = geolocator.geocode(check_query, addressdetails=True)
+                    
+                    if location:
+                        addr = location.raw.get('address', {})
+                        # Zielort extrahieren (Stadtteil oder Gemeinde)
+                        ziel = addr.get('village') or addr.get('suburb') or addr.get('city') or addr.get('town')
+                        st.success(f"✅ **Ziel erkannt:** {m_s} liegt in **{ziel}**")
+                        target_found = True
+                    else:
+                        st.warning("⚠️ Straße nicht gefunden. Bitte Schreibweise prüfen (z.B. 'Str.' zu 'Straße').")
+            except:
+                st.error("Verbindung zum Geocoding-Dienst unterbrochen.")
+
+        if st.button("➕ In Liste speichern", use_container_width=True, disabled=not m_s):
+            full_entry = f"{m_s} | {m_h}".strip(" |")
+            if full_entry not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(full_entry)
+                save_streets(st.session_state.saved_manual_streets)
+                st.rerun()
 
     with col_list:
-        st.subheader("📝 Verifizierter Cache")
+        st.subheader("📝 Aktueller Cache")
         df = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-        st.data_editor(df, use_container_width=True, height=200, key="editor")
+        edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic", height=200)
         
-        if st.button("🗑️ Cache leeren", type="secondary"):
+        c_sv, c_cl = st.columns(2)
+        if c_sv.button("💾 Liste korrigieren", use_container_width=True):
+            st.session_state.saved_manual_streets = edited_df["Eintrag"].tolist()
+            save_streets(st.session_state.saved_manual_streets)
+            st.rerun()
+        if c_cl.button("🗑️ Cache leeren", use_container_width=True):
             st.session_state.saved_manual_streets = []
-            if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+            save_streets([])
             st.rerun()
 
-# --- 5. ANALYSE & KARTE ---
-# (Wie gehabt: Greift nur auf die nun saubere 'saved_manual_streets' Liste zu)
+# --- 6. STEUERUNG & ANALYSE (Punkte wie gehabt) ---
+# [Hier folgt der Rest des GOLD3002 Codes für Analyse und Karte]
