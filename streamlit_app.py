@@ -7,58 +7,90 @@ import geopandas as gpd
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import streamlit.components.v1 as components
 
-# --- 1. SETUP & PERSISTENTER CACHE ---
+# --- 1. SETUP & THEME (Fix auf Dunkel) ---
 st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
 
-# Pfade für Cloud-Kompatibilität & Persistenz
+# Hintergrundbild Link (Raw)
+GITHUB_BG_URL = 'https://raw.githubusercontent.com/waldsterbehilfe/integral-web/main/hintergrund.png'
+
+# --- THEME SWITCHER UI (Sidebar) ---
+with st.sidebar:
+    st.title("Einstellungen")
+    bg_toggle = st.checkbox("Hintergrundbild", value=True)
+    st.divider()
+
+# Hintergrundbild Logik via CSS
+if bg_toggle:
+    st.markdown(f"""
+        <style>
+            .stApp {{
+                background-image: url('{GITHUB_BG_URL}');
+                background-size: cover;
+                background-attachment: fixed;
+                background-color: #0E1117;
+            }}
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+        <style>
+            .stApp {
+                background-image: none;
+                background-color: #0E1117;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. LOGIK ---
+geolocator = Nominatim(user_agent="integral_pro_app")
+reverse = RateLimiter(geolocator.reverse, min_delay_seconds=1)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "persistent_geocache")
-
-try:
-    os.makedirs(CACHE_DIR, exist_ok=True)
-except OSError as e:
-    st.error(f"Cache-Fehler: {e}")
-
+os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-# Session States zur Steuerung
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 
 def get_random_color():
     return f"#{random.randint(0, 0xFFFFFF):06x}"
 
-# --- 2. LOGIK ---
 def verarbeite_strasse(strasse):
-    # Bereinigung: 'str.' zu 'Straße' für bessere OSM-Treffer
     s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
-    query = f"{s_clean}, Landkreis Marburg-Biedenkopf, Germany"
+    query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # OSM-Daten abrufen (Radius 800m für Präzision)
-        gdf = ox.features_from_address(query, tags={"highway": True}, dist=800)
+        gdf = ox.features_from_address(query, tags={"highway": True}, dist=500)
         
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])]
-            # Namensfilter: Nur Geometrien, die den Namen auch wirklich enthalten
             if 'name' in gdf.columns:
                 gdf_f = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
             else:
                 gdf_f = gdf
 
             if not gdf_f.empty:
-                # Ortsteil-Erkennung aus verschiedenen OSM-Tags
                 ortsteil = "Unbekannter_Ort"
-                for col in ['addr:suburb', 'suburb', 'village', 'hamlet', 'addr:city']:
-                    if col in gdf_f.columns and gdf_f[col].dropna().any():
-                        val = str(gdf_f[col].dropna().iloc[0])
-                        if "Marburg-Biedenkopf" not in val:
-                            ortsteil = val
+                centroid = gdf_f.geometry.centroid.iloc[0]
+                location = reverse((centroid.y, centroid.x), language='de')
+                
+                if location and 'address' in location.raw:
+                    addr = location.raw['address']
+                    for key in ['village', 'hamlet', 'suburb', 'city_district', 'town']:
+                        if key in addr:
+                            ortsteil = addr[key]
                             break
+                
                 return {"gdf": gdf_f, "ort": ortsteil, "name": s_clean, "success": True}
-    except: pass
+    except Exception as e:
+        return {"success": False, "original": strasse, "error": str(e)}
+        
     return {"success": False, "original": strasse}
 
 # --- 3. UI ---
@@ -67,7 +99,7 @@ with col_logo:
     st.image("https://integral-online.de/images/integral-gmbh-logo.png", width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **HTML Layer Edition (Gold Standard)**")
+    st.markdown("Automatisierte Sortierung — **V4.9 (Stable)**")
 
 st.divider()
 
@@ -77,7 +109,6 @@ with col_in1:
 with col_in2:
     manual_input = st.text_area("Manuelle Eingabe", placeholder="z.B. Schweinsberger Str", height=126)
 
-# Liste bereinigen & Dubletten entfernen
 strassen_liste = []
 if uploaded_files:
     for f in uploaded_files:
@@ -86,7 +117,7 @@ if manual_input:
     strassen_liste.extend([s.strip() for s in manual_input.splitlines() if s.strip()])
 strassen_liste = list(dict.fromkeys(strassen_liste))
 
-# Steuerungs-Buttons
+# Buttons
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 if col_btn1.button("🚀 Analyse starten", type="primary"):
     st.session_state.run_processing = True
@@ -103,7 +134,6 @@ if st.session_state.run_processing and strassen_liste:
     prog_bar = st.progress(0)
     status_text = st.empty()
     
-    # Multithreading für 5-fache Geschwindigkeit
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
@@ -121,29 +151,31 @@ if st.session_state.run_processing and strassen_liste:
             prog_bar.progress((i + 1) / len(strassen_liste))
             status_text.text(f"🔍 {res.get('name', res.get('original'))} ({i+1}/{len(strassen_liste)})")
 
-    # --- 5. ERGEBNIS-GENERIERUNG ---
+    # --- 5. ERGEBNIS-GENERIERUNG & ANZEIGE ---
     if ort_sammlung and not st.session_state.stop_requested:
-        # Karte erstellen
         m = folium.Map(location=[50.8, 8.8], zoom_start=11, control_scale=True)
         
         for ort in sorted(ort_sammlung.keys()):
             color = get_random_color()
-            # FeatureGroup = Ebene im Menü
             fg = folium.FeatureGroup(name=f"📍 {ort} ({len(ort_sammlung[ort])} Str.)")
             
             for item in ort_sammlung[ort]:
-                folium.GeoJson(
-                    item["gdf"],
-                    style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                    tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
-                    popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
-                ).add_to(fg)
+                # Robustes GeoJSON Rendering
+                gdf = item["gdf"]
+                if not gdf.empty:
+                    # Umwandlung für Folium Kompatibilität
+                    geojson_data = gdf.__geo_interface__
+                    
+                    folium.GeoJson(
+                        geojson_data,
+                        style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
+                        tooltip=folium.GeoJsonTooltip(fields=['name'], aliases=['Straße:']),
+                        popup=folium.GeoJsonPopup(fields=['name'], aliases=['Name:'])
+                    ).add_to(fg)
             fg.add_to(m)
         
-        # Ebenen-Steuerung (standardmäßig offen)
         folium.LayerControl(collapsed=False).add_to(m)
         
-        # Automatischer Fokus auf alle gefundenen Straßen
         if all_geoms:
             combined = gpd.GeoDataFrame(pd.concat(all_geoms))
             b = combined.total_bounds 
@@ -151,19 +183,25 @@ if st.session_state.run_processing and strassen_liste:
 
         st.success(f"✅ Fertig! {len(ort_sammlung)} Ortsteile/Ebenen erkannt.")
         
-        # HTML Download
-        html_string = m._repr_html_()
-        st.download_button(
-            label="📥 Interaktive Karte herunterladen",
-            data=html_string,
-            file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
-            mime="text/html"
-        )
+        # --- DIREKTE ANZEIGE ---
+        st.subheader("Interaktive Karte")
+        try:
+            html_string = m._repr_html_()
+            components.html(html_string, height=600)
+            
+            # Optionaler Download
+            st.download_button(
+                label="📥 Karte als HTML Datei herunterladen",
+                data=html_string,
+                file_name=f"INTEGRAL_Master_{datetime.now().strftime('%H%M')}.html",
+                mime="text/html"
+            )
+        except Exception as e:
+            st.error(f"Fehler beim Rendern der Karte: {e}")
 
     if fehler_liste and not st.session_state.stop_requested:
         with st.expander("⚠️ Nicht gefundene Straßen"):
             st.write(", ".join(fehler_liste))
 
-    # Aufräumen für den nächsten Run
     st.session_state.run_processing = False
     st.session_state.stop_requested = False
