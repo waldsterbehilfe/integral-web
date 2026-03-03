@@ -9,7 +9,7 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-FINAL"
+SERIAL_NUMBER = "SN-029-GOLD3002-FIXED"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,10 +19,9 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-# Rotierender User-Agent für maximale Stabilität
-geolocator = Nominatim(user_agent=f"integral_pro_final_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_pro_fixed_{random.randint(1000,9999)}", timeout=12)
 
-# --- 2. ROBUSTE PERSISTENZ (PRO-LOGIK) ---
+# --- 2. ROBUSTE PERSISTENZ ---
 def load_streets():
     if not os.path.exists(STREETS_FILE):
         return []
@@ -31,12 +30,12 @@ def load_streets():
             lines = [l.strip() for l in f.readlines() if l.strip()]
             return sorted(list(set(lines)))
     except Exception as e:
-        st.error(f"Fehler beim Laden der Datei: {e}")
+        st.error(f"Fehler beim Laden: {e}")
         return []
 
 def save_streets_safely(streets_list):
-    """Schreibt Daten erst in eine Temp-Datei, um Datenverlust zu verhindern."""
-    unique_streets = sorted(list(set(streets_list)))
+    """Schreibt Daten atomar, um Datenverlust zu verhindern."""
+    unique_streets = sorted(list(set([s.strip() for s in streets_list if s.strip()])))
     try:
         with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8-sig', dir=BASE_DIR) as tf:
             tf.write("\n".join(unique_streets))
@@ -60,14 +59,11 @@ def intelligent_parse(line):
     return line, ""
 
 def validate_street_smart(input_street, cache_list):
-    # Cache-Check (Effizienz)
     input_norm = input_street.lower().replace("str.", "straße").strip()
     for entry in cache_list:
         cached_name = entry.split(" | ")[0]
         if input_norm == cached_name.lower().replace("str.", "straße").strip():
             return cached_name
-    
-    # API-Check
     try:
         query = f"{input_street}, Marburg-Biedenkopf"
         location = geolocator.geocode(query, addressdetails=True)
@@ -75,7 +71,7 @@ def validate_street_smart(input_street, cache_list):
             addr = location.raw.get('address', {})
             return addr.get('road') or addr.get('pedestrian') or input_street
     except:
-        time.sleep(2) # Kurze Pause bei API-Problemen
+        time.sleep(1)
     return input_street
 
 # --- 4. SESSION STATE ---
@@ -90,20 +86,26 @@ if 'ort_sammlung' not in st.session_state:
 
 # --- 5. UI: IMPORT & INPUT ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Status: {SERIAL_NUMBER} | Lokal gespeichert: {len(st.session_state.saved_manual_streets)} Einträge")
+st.caption(f"Status: {SERIAL_NUMBER} | Geladen: {len(st.session_state.saved_manual_streets)} Einträge")
 
 with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
     up = st.file_uploader("TXT-Dateien wählen", type=["txt"], accept_multiple_files=True)
     if up:
-        new_raw = []
+        new_entries = []
         for f in up:
             lines = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
-            new_raw.extend([l.strip() for l in lines if l.strip()])
-        combined = list(set(st.session_state.saved_manual_streets + new_raw))
-        st.session_state.saved_manual_streets = sorted(combined)
-        save_streets_safely(st.session_state.saved_manual_streets)
-        st.success("Import abgeschlossen.")
-        st.rerun()
+            for l in lines:
+                if l.strip():
+                    # Wir parsen und formatieren direkt beim Import für Konsistenz
+                    s_name, h_num = intelligent_parse(l)
+                    new_entries.append(f"{s_name} | {h_num}".strip(" |"))
+        
+        if new_entries:
+            combined = list(set(st.session_state.saved_manual_streets + new_entries))
+            st.session_state.saved_manual_streets = sorted(combined)
+            save_streets_safely(st.session_state.saved_manual_streets)
+            st.success(f"{len(new_entries)} Einträge verarbeitet.")
+            st.rerun()
 
     c1, c2, c3 = st.columns([3, 1, 1])
     m_s = c1.text_input("Straße")
