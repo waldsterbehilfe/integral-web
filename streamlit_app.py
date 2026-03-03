@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 from difflib import get_close_matches
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-ULTIMATE-FIX"
+SERIAL_NUMBER = "SN-029-GOLD3002-CELEBRATION"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,15 +21,14 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_ultimate_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_celeb_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. PERSISTENZ & CACHE LOGIK ---
 def load_streets():
     if not os.path.exists(STREETS_FILE): return []
     try:
         with open(STREETS_FILE, "r", encoding="utf-8-sig") as f:
-            lines = [l.strip() for l in f.readlines() if l.strip()]
-            return sorted(list(set(lines)))
+            return sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
     except: return []
 
 def save_streets_safely(streets_list):
@@ -90,80 +89,58 @@ if 'stop_requested' not in st.session_state:
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
 
-# --- 5. UI: IMPORT & INPUT ---
+# --- 5. UI: IMPORT & STEUERUNG ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Status: {SERIAL_NUMBER} | Einträge: {len(st.session_state.saved_manual_streets)}")
+st.caption(f"Status: {SERIAL_NUMBER} | Gesamtzahl geladen: {len(st.session_state.saved_manual_streets)}")
 
-with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
-    # Eindeutiger Key für den Uploader
-    up = st.file_uploader("*.txt Dateien auswählen", type=["txt"], accept_multiple_files=True, key="file_uploader_main")
-    
+with st.container(border=True):
+    up = st.file_uploader("*.txt Dateien hochladen", type=["txt"], accept_multiple_files=True, key="uploader_celeb")
     if up:
         new_raw = []
         for f in up:
             content = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
             new_raw.extend([l.strip() for l in content if l.strip()])
-        
         if new_raw:
-            # WICHTIG: Sofortige Verschmelzung mit dem State
-            current_list = st.session_state.saved_manual_streets
-            combined = sorted(list(set(current_list + new_raw)))
-            st.session_state.saved_manual_streets = combined
-            save_streets_safely(combined)
-            st.success(f"{len(new_raw)} Zeilen verarbeitet.")
-            # Hartes Rerendering erzwingen
+            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_raw)))
+            save_streets_safely(st.session_state.saved_manual_streets)
+            st.success(f"Erfolgreich geladen: {len(new_raw)} neue Zeilen.")
             st.rerun()
 
-    c1, c2, c3 = st.columns([3, 1, 1])
-    m_s = c1.text_input("Straße", key="manual_s_in")
-    m_h = c2.text_input("Hnr", key="manual_h_in")
-    if c3.button("Hinzufügen", use_container_width=True):
-        if m_s:
-            entry = f"{m_s} | {m_h}".strip(" |")
-            if entry not in st.session_state.saved_manual_streets:
-                st.session_state.saved_manual_streets.append(entry)
-                st.session_state.saved_manual_streets.sort()
-                save_streets_safely(st.session_state.saved_manual_streets)
-                st.rerun()
-
-# --- 6. LISTE & STEUERUNG ---
-with st.container(border=True):
-    # DataFrame wird bei jedem Lauf aus dem State neu erzeugt
-    df_disp = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-    # Der Key ändert sich bei jeder Änderung der Anzahl -> Refresh-Trigger
-    ed_key = f"editor_v1_{len(st.session_state.saved_manual_streets)}"
-    ed_df = st.data_editor(df_disp, use_container_width=True, num_rows="dynamic", height=250, key=ed_key)
-    
-    col_b1, col_b2, col_b3 = st.columns(3)
-    if col_b1.button("💾 Liste sichern", use_container_width=True):
-        st.session_state.saved_manual_streets = sorted(list(set(ed_df["Eintrag"].tolist())))
-        save_streets_safely(st.session_state.saved_manual_streets)
-        st.rerun()
-    if col_b2.button("🗑️ Liste leeren", use_container_width=True):
+    st.divider()
+    c_btn1, c_btn2 = st.columns(2)
+    if c_btn1.button("🗑️ Liste leeren", use_container_width=True):
         st.session_state.saved_manual_streets = []
         save_streets_safely([])
         st.rerun()
-    if col_btn_start := col_b3.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
-        st.session_state.run_processing = True
-        st.session_state.stop_requested = False
-        st.rerun()
+    if c_btn2.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
+        if not st.session_state.saved_manual_streets:
+            st.warning("Keine Daten vorhanden!")
+        else:
+            st.session_state.run_processing = True
+            st.session_state.stop_requested = False
+            st.rerun()
 
-# --- 7. ANALYSE-ENGINE ---
+# --- 6. ANALYSE-ENGINE (MIT KONFETTI-ABSCHLUSS) ---
 if st.session_state.run_processing:
     results = defaultdict(list)
     v_cache = load_verified_cache()
     ort_cache = {}
     s_list = st.session_state.saved_manual_streets
+    total_count = len(s_list)
     
     if st.button("🛑 STOP"): st.session_state.stop_requested = True
 
     with st.status("Verarbeitung läuft...", expanded=True) as status:
         p_bar = st.progress(0)
+        st_info = st.empty()
+        
         for i, s in enumerate(s_list):
             if st.session_state.stop_requested: break
             
+            display_index = i + 1
+            st_info.markdown(f"**Verarbeite:** `{s}`  \n(Eintrag **{display_index}** von **{total_count}**)")
+            
             raw_s, hnr = intelligent_parse(s)
-            # Option 1: Validierung beim Start
             v_name = validate_at_start(raw_s, v_cache)
             s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', v_name).strip()
             
@@ -189,19 +166,26 @@ if st.session_state.run_processing:
                                 addr = rv.raw.get('address', {})
                                 ort = addr.get('village') or addr.get('suburb') or addr.get('town') or "Marburg-Land"
                                 ort_cache[ckey] = ort
-                            except: ort = "Unbekannt"
+                            except: ort = "Marburg-Land"
                         
                         results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
             except: pass
-            p_bar.progress((i + 1) / len(s_list))
-            time.sleep(1.1)
+            
+            p_bar.progress(display_index / total_count)
+            time.sleep(1.05)
         
+        st_info.empty()
         st.session_state.ort_sammlung = dict(results)
         st.session_state.run_processing = False
-        status.update(label="Fertig!", state="complete")
+        
+        # --- KONFETTI & BALLONS BEIM ABSCHLUSS ---
+        if not st.session_state.stop_requested:
+            st.balloons() # Löst die Animation aus
+            
+        status.update(label=f"Fertig! {total_count} von {total_count} Einträgen verarbeitet.", state="complete")
         st.rerun()
 
-# --- 8. AUSGABE & STATISTIK (OPTION 2) ---
+# --- 7. AUSGABE & STATISTIK ---
 if st.session_state.ort_sammlung:
     st.divider()
     st.subheader("📊 Ortsteil-Verteilung")
@@ -210,7 +194,7 @@ if st.session_state.ort_sammlung:
 
     exp_df = pd.DataFrame([{"Ortsteil": k, "Straße": i["name"], "Quelle": i["orig"]} 
                           for k, v in st.session_state.ort_sammlung.items() for i in v])
-    st.download_button("📥 Ergebnisse (CSV)", exp_df.to_csv(index=False).encode('utf-8-sig'), "export.csv", use_container_width=True)
+    st.download_button("📥 Ergebnisse (CSV) exportieren", exp_df.to_csv(index=False).encode('utf-8-sig'), "export_final.csv", use_container_width=True)
 
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
     all_pts = []
