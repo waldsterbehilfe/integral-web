@@ -23,96 +23,157 @@ ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
 
-# --- 2. PERSISTENZ-FUNKTIONEN ---
+# --- 2. PERSISTENZ-FUNKTIONEN (CACHE) ---
 def load_streets():
     if os.path.exists(STREETS_FILE):
         try:
             with open(STREETS_FILE, "r", encoding="utf-8") as f:
-                return sorted(list(set(line.strip() for line in f if line.strip())))
+                return [line.strip() for line in f.readlines() if line.strip()]
         except: return []
     return []
 
 def save_streets(streets_list):
     try:
-        clean_list = sorted(list(set(s.strip() for s in streets_list if s.strip())))
         with open(STREETS_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(clean_list))
+            f.write("\n".join(streets_list))
     except Exception as e:
         st.error(f"Fehler beim Speichern: {e}")
 
 # --- 3. SESSION STATE ---
 if 'saved_manual_streets' not in st.session_state:
     st.session_state.saved_manual_streets = load_streets()
-if 'ort_sammlung' not in st.session_state:
-    st.session_state.ort_sammlung = None
 if 'run_processing' not in st.session_state:
     st.session_state.run_processing = False
+if 'stop_requested' not in st.session_state:
+    st.session_state.stop_requested = False
+if 'ort_sammlung' not in st.session_state:
+    st.session_state.ort_sammlung = None
 
-# --- 4. UI-KOMPONENTEN ---
+# --- 4. UI: HEADER & STATISTIK ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Version: {SERIAL_NUMBER} | Fokus: Marburg-Biedenkopf")
+cache_count = len(st.session_state.saved_manual_streets)
+st.caption(f"Version: {SERIAL_NUMBER} | Straßen im Cache: **{cache_count}** | Fokus: Marburg-Biedenkopf")
 
-# Der Container für den sofortigen Daten-Import
+# --- 5. INPUT-MANAGEMENT ---
 with st.container(border=True):
-    col_up, col_list = st.columns([1, 1])
-    
-    with col_up:
-        st.subheader("📥 TXT-Upload")
-        # Jede Änderung hier löst einen sofortigen Rerun aus
-        uploaded_files = st.file_uploader(
-            "Wähle *.txt Dateien aus", 
-            type=["txt"], 
-            accept_multiple_files=True,
-            key="file_loader"
-        )
+    col_input, col_table = st.columns([1, 1])
+
+    with col_input:
+        st.subheader("📥 Dateneingabe")
         
+        # Manueller Input
+        with st.expander("Manuelle Eingabe", expanded=True):
+            c_str, c_hnr = st.columns([3, 1])
+            q_street = c_str.text_input("Straßenname", placeholder="z.B. Frankfurter Straße")
+            q_hnr = c_hnr.text_input("Hnr (optional)", placeholder="1a")
+            if st.button("➕ Zur Liste hinzufügen"):
+                if q_street:
+                    entry = f"{q_street} | {q_hnr}".strip(" |")
+                    if entry not in st.session_state.saved_manual_streets:
+                        st.session_state.saved_manual_streets.append(entry)
+                        save_streets(st.session_state.saved_manual_streets)
+                        st.rerun()
+
+        # TXT-Upload
+        uploaded_files = st.file_uploader("TXT-Dateien importieren", type=["txt"], accept_multiple_files=True)
         if uploaded_files:
             new_entries = []
             for f in uploaded_files:
-                # Datei zeilenweise auslesen
                 lines = f.getvalue().decode("utf-8").splitlines()
                 new_entries.extend([l.strip() for l in lines if l.strip()])
-            
-            # Bestehende Liste nehmen, neue hinzufügen, Duplikate entfernen
-            current_list = st.session_state.saved_manual_streets
-            updated_list = sorted(list(set(current_list + new_entries)))
-            
-            # Nur speichern und neu laden, wenn sich wirklich etwas geändert hat
-            if len(updated_list) > len(current_list):
-                st.session_state.saved_manual_streets = updated_list
-                save_streets(updated_list)
-                st.success(f"Erfolg: {len(new_entries)} Einträge verarbeitet.")
-                time.sleep(0.5)
-                st.rerun()
+            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_entries)))
+            save_streets(st.session_state.saved_manual_streets)
+            st.rerun()
 
-    with col_list:
-        st.subheader(f"📝 Aktuelle Liste ({len(st.session_state.saved_manual_streets)})")
+    with col_table:
+        st.subheader("📝 Liste & Korrektur")
         if st.session_state.saved_manual_streets:
-            # Anzeige als DataFrame für bessere Übersicht
-            st.dataframe(
-                pd.DataFrame(st.session_state.saved_manual_streets, columns=["Straßenname"]), 
-                use_container_width=True, 
-                height=200
+            # Korrektur-Möglichkeit via Data Editor
+            edited_df = st.data_editor(
+                pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"]),
+                use_container_width=True,
+                num_rows="dynamic",
+                height=250,
+                key="editor"
             )
-            if st.button("🗑️ Liste komplett leeren"):
+            # Speichern der Änderungen aus dem Editor
+            if st.button("💾 Änderungen übernehmen"):
+                st.session_state.saved_manual_streets = edited_df["Eintrag"].tolist()
+                save_streets(st.session_state.saved_manual_streets)
+                st.rerun()
+            
+            if st.button("🗑️ Cache (Liste) leeren"):
                 st.session_state.saved_manual_streets = []
                 save_streets([])
                 st.rerun()
         else:
-            st.info("Warten auf Daten-Upload...")
+            st.info("Keine Daten vorhanden.")
 
-# --- 5. ANALYSE-LOGIK ---
+# --- 6. STEUERUNG & ABBRUCH ---
 st.divider()
+c_start, c_stop = st.columns(2)
 
-if st.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
-    if not st.session_state.saved_manual_streets:
-        st.warning("Bitte zuerst Straßen hochladen!")
-    else:
-        st.session_state.run_processing = True
+if c_start.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True, disabled=st.session_state.run_processing):
+    st.session_state.run_processing = True
+    st.session_state.stop_requested = False
+    st.rerun()
 
-if st.session_state.run_processing:
-    # Hier folgt die bereits geprüfte Analyse-Logik (ox.features_from_address etc.)
-    # Zur Übersichtlichkeit hier verkürzt - die Mechanik bleibt identisch zum Vorherigen
-    st.info("Analyse läuft... (Hier wird die Karte generiert)")
-    # [Rest der Analyse-Logik wie zuvor]
+if c_stop.button("🛑 ABBRUCH / ANHALTEN", type="secondary", use_container_width=True):
+    st.session_state.stop_requested = True
     st.session_state.run_processing = False
+    st.warning("Abbruch wird verarbeitet...")
+
+# --- 7. VERARBEITUNGS-LOGIK ---
+if st.session_state.run_processing:
+    results = defaultdict(list)
+    s_list = st.session_state.saved_manual_streets
+    
+    with st.status("Verarbeite Straßen...", expanded=True) as status:
+        p_bar = st.progress(0)
+        for i, s in enumerate(s_list):
+            if st.session_state.stop_requested:
+                status.update(label="Analyse abgebrochen.", state="error")
+                break
+                
+            # Hier findet die Geokodierung statt
+            time.sleep(1.1) 
+            try:
+                # Normierung und Abfrage
+                s_base = s.split(" | ")[0]
+                s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', s_base).strip()
+                
+                gdf = ox.features_from_address(f"{s_clean}, Marburg-Biedenkopf", tags={"highway": True}, dist=50)
+                if not gdf.empty:
+                    gdf = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
+                    gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
+                    
+                    # Ort bestimmen
+                    centroid = gdf.geometry.unary_union.centroid
+                    loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de')
+                    ort = loc_rev.raw.get('address', {}).get('village', "Marburg")
+                    
+                    results[ort].append({"gdf": gdf, "name": s_clean, "original": s})
+            except:
+                pass
+                
+            p_bar.progress((i + 1) / len(s_list))
+        
+        if not st.session_state.stop_requested:
+            status.update(label="Analyse erfolgreich!", state="complete")
+            st.session_state.ort_sammlung = dict(results)
+            st.session_state.run_processing = False
+            st.balloons()
+            st.rerun()
+
+# --- 8. KARTEN-AUSGABE ---
+if st.session_state.ort_sammlung:
+    st.subheader("🗺️ Ergebnis-Karte")
+    m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
+    for ort, items in st.session_state.ort_sammlung.items():
+        fg = folium.FeatureGroup(name=ort)
+        color = "#%06x" % random.randint(0, 0xFFFFFF)
+        for itm in items:
+            folium.GeoJson(itm["gdf"].__geo_interface__, style_function=lambda x, c=color: {'color': c, 'weight': 5}).add_to(fg)
+        fg.add_to(m)
+    folium.LayerControl().add_to(m)
+    components.html(m._repr_html_(), height=600)
