@@ -10,18 +10,19 @@ import streamlit.components.v1 as components
 from difflib import get_close_matches
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-TITANIUM"
+SERIAL_NUMBER = "test 1 2 3"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="🚀")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 VERIFIED_CACHE_FILE = os.path.join(BASE_DIR, ".verified_streets.json")
+ORTSTEIL_CACHE_FILE = os.path.join(BASE_DIR, ".ortsteil_cache.json") # NEU: Permanenter Ortsteil-Cache
 CACHE_DIR = os.path.join(BASE_DIR, "osmnx_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_titanium_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_speed_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. PERSISTENZ & CACHE LOGIK ---
 def load_streets():
@@ -52,6 +53,21 @@ def save_to_verified_cache(raw_name, verified_name):
     cache = load_verified_cache()
     cache[raw_name.lower().strip()] = verified_name
     with open(VERIFIED_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=4)
+
+# NEU: Persistenter Ortsteil-Cache
+def load_ort_cache():
+    if os.path.exists(ORTSTEIL_CACHE_FILE):
+        try:
+            with open(ORTSTEIL_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: return {}
+    return {}
+
+def save_to_ort_cache(ckey, ort_name):
+    cache = load_ort_cache()
+    cache[ckey] = ort_name
+    with open(ORTSTEIL_CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=4)
 
 # --- 3. LOGIK-FUNKTIONEN ---
@@ -91,9 +107,8 @@ if 'ort_sammlung' not in st.session_state:
 
 # --- 5. UI: HEADER & EXPERTEN-WERKZEUGE ---
 st.title("🚀 INTEGRAL PRO")
-st.markdown(f"**Edition:** TITANIUM (Basierend auf GOLD3002) | **Aktuelle Liste:** {len(st.session_state.saved_manual_streets)} Einträge")
+st.markdown(f"**Edition:** {SERIAL_NUMBER} | **Aktuelle Liste:** {len(st.session_state.saved_manual_streets)} Einträge")
 
-# Die alten Funktionen, sauber verpackt, damit sie den schnellen Workflow nicht stören
 with st.expander("⚙️ Experten-Werkzeuge: Manuelle Eingabe & Listen-Editor"):
     col_man1, col_man2 = st.columns([1, 2])
     
@@ -138,7 +153,7 @@ with st.container(border=True):
             if len(combined) != len(st.session_state.saved_manual_streets):
                 st.session_state.saved_manual_streets = combined
                 save_streets_safely(combined)
-                st.rerun() # Sofortiger Sync
+                st.rerun()
 
     c_btn1, c_btn2 = st.columns(2)
     if c_btn1.button("🗑️ Gesamte Liste leeren", use_container_width=True):
@@ -160,7 +175,7 @@ if st.session_state.run_processing:
     st.divider()
     results = defaultdict(list)
     v_cache = load_verified_cache()
-    ort_cache = {} 
+    ort_cache = load_ort_cache() # Lädt jetzt den permanenten Cache!
     s_list = st.session_state.saved_manual_streets
     total_count = len(s_list)
     
@@ -170,11 +185,14 @@ if st.session_state.run_processing:
             st.session_state.stop_requested = True
 
     with col_spin:
-        with st.spinner("🚀 HIGH-SPEED ANALYSE LÄUFT (CACHE AKTIV)..."):
+        with st.spinner("🚀 HIGH-SPEED ANALYSE LÄUFT..."):
             st_info = st.empty()
             
             for i, s in enumerate(s_list):
                 if st.session_state.stop_requested: break
+                
+                # Messung für den Speed-Boost starten
+                start_time = time.time()
                 
                 display_index = i + 1
                 st_info.markdown(f"#### 📍 Analysiere: `{s}`\n**Eintrag {display_index} von {total_count}**")
@@ -205,13 +223,19 @@ if st.session_state.run_processing:
                                     rv = geolocator.reverse((cent.y, cent.x), language='de')
                                     addr = rv.raw.get('address', {})
                                     ort = addr.get('village') or addr.get('suburb') or addr.get('town') or "Unbekannt"
+                                    save_to_ort_cache(ckey, ort) # Sofort speichern!
                                     ort_cache[ckey] = ort
                                 except: ort = "Marburg-Region"
                             
                             results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
                 except: pass
                 
-                time.sleep(1.05) # Stabile API-Pause
+                # DER SPEED-BOOST: 
+                # Wenn die Abfrage extrem schnell war (< 0.2 Sekunden), kamen die Daten
+                # garantiert aus den Caches. In diesem Fall müssen wir NICHT 1 Sekunde warten!
+                elapsed_time = time.time() - start_time
+                if elapsed_time > 0.2:
+                    time.sleep(1.05) # Nur warten, wenn das Internet wirklich befragt wurde
             
             st_info.empty()
             st.session_state.ort_sammlung = dict(results)
