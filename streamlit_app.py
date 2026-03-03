@@ -11,13 +11,14 @@ from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 import time
 
-# --- 1. SETUP ---
+# --- 1. SETUP & SERIENNUMMER ---
 SERIAL_NUMBER = f"GOLD-{datetime.now().strftime('%Y%m%d-%H%M')}"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 CACHE_DIR = os.path.join(BASE_DIR, "osmnx_cache")
+EGG_IMAGE_PATH = os.path.join(BASE_DIR, "eegg.jpg") # Pfad zum Easter Egg Bild
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
@@ -30,59 +31,64 @@ if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
 if 'colors' not in st.session_state: st.session_state.colors = {}
+if 'egg_counter' not in st.session_state: st.session_state.egg_counter = 0
 
-# --- 2. SIDEBAR (ERWEITERT) ---
+# --- 2. SIDEBAR ---
 with st.sidebar:
     st.header("🛠️ Einstellungen")
+    line_weight = st.slider("Linienstärke Karte", 1, 15, 6)
     
-    # NEU: Linienstärke für bessere Hover-Erfahrung
-    line_weight = st.slider("Linienstärke (Karte)", 1, 15, 6)
-    
-    st.divider()
     if st.session_state.ort_sammlung:
         st.subheader("🎨 Ortsteil-Farben")
         for ort in sorted(st.session_state.ort_sammlung.keys()):
             st.session_state.colors[ort] = st.color_picker(f"{ort}", st.session_state.colors.get(ort, "#FF0000"), key=f"cp_{ort}")
     
     st.divider()
-    if st.button("🗑️ Cache leeren"):
+    if st.button("🗑️ Cache & System leeren"):
         if os.path.exists(CACHE_DIR): shutil.rmtree(CACHE_DIR)
+        st.cache_data.clear()
         st.rerun()
 
-# --- 3. LOGIK ---
-def verarbeite_strasse(strasse_input):
-    if st.session_state.stop_requested: return {"success": False}
-    time.sleep(1.1)
-    parts = strasse_input.split(" | ") if " | " in strasse_input else [strasse_input, None]
-    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', parts[0].strip()).strip()
-    try:
-        gdf = ox.features_from_address(f"{s_clean}, Marburg-Biedenkopf", tags={"highway": True}, dist=60)
-        if gdf.empty: return {"success": False}
-        gdf = gdf[gdf['name'].apply(lambda x: str(x).strip().lower() == s_clean.lower())]
-        if gdf.empty: return {"success": False}
-        gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
-        
-        centroid = gdf.geometry.unary_union.centroid
-        loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de')
-        ort = loc_rev.raw.get('address', {}).get('village') or loc_rev.raw.get('address', {}).get('suburb', "Marburg")
-        
-        return {"gdf": gdf, "ort": ort, "name": s_clean, "original": strasse_input, "marker": None, "success": True}
-    except: return {"success": False}
+# --- 3. HAUPTBEREICH & EASTER EGG ---
+c_title, c_egg_trigger = st.columns([12, 1])
+with c_title:
+    st.title("🚀 INTEGRAL PRO")
+with c_egg_trigger:
+    # Das "O" als unsichtbarer Button-Trigger
+    if st.button("O", key="egg_btn", help="Klick mich!"):
+        st.session_state.egg_counter += 1
 
-# --- 4. UI HAUPTBEREICH ---
-st.title("🚀 INTEGRAL PRO")
+# Easter Egg Logik (10 Klicks)
+if st.session_state.egg_counter >= 10:
+    st.balloons()
+    with st.container(border=True):
+        st.success("🎉 Easter Egg aktiviert!")
+        if os.path.exists(EGG_IMAGE_PATH):
+            st.image(EGG_IMAGE_PATH, caption="Überraschung!", use_container_width=True)
+        else:
+            st.error(f"Bild 'eegg.jpg' wurde im Ordner {BASE_DIR} nicht gefunden.")
+        
+        if st.button("Schließen"):
+            st.session_state.egg_counter = 0
+            st.rerun()
+
+st.divider()
+
+# --- 4. INPUT MANAGEMENT ---
 col_in1, col_in2 = st.columns(2)
-
 with col_in1:
     with st.container(border=True):
         files = st.file_uploader("TXT Dateien importieren", type=["txt"], accept_multiple_files=True)
         if files:
             new = []
-            for f in files: new.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
+            for f in files: 
+                lines = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
+                new.extend(lines)
             st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new)))
             st.rerun()
         
-        q_s = st.text_input("Straße:")
+        st.divider()
+        q_s = st.text_input("Straße hinzufügen:")
         if st.button("➕ Hinzufügen"):
             if q_s and q_s not in st.session_state.saved_manual_streets:
                 st.session_state.saved_manual_streets.append(q_s)
@@ -90,15 +96,32 @@ with col_in1:
                 st.rerun()
 
 with col_in2:
+    st.subheader("📝 Aktuelle Liste")
     st.dataframe(st.session_state.saved_manual_streets, use_container_width=True, height=220)
     if st.button("🗑️ Liste leeren"):
         st.session_state.saved_manual_streets = []
         st.rerun()
 
+# --- 5. ANALYSE-LOGIK ---
+def verarbeite_strasse(strasse_input):
+    if st.session_state.stop_requested: return {"success": False}
+    time.sleep(1.1)
+    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_input).strip()
+    try:
+        gdf = ox.features_from_address(f"{s_clean}, Marburg-Biedenkopf", tags={"highway": True}, dist=60)
+        if gdf.empty: return {"success": False}
+        gdf = gdf[gdf['name'].apply(lambda x: str(x).strip().lower() == s_clean.lower())]
+        if gdf.empty: return {"success": False}
+        gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
+        centroid = gdf.geometry.unary_union.centroid
+        loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de')
+        ort = loc_rev.raw.get('address', {}).get('village') or loc_rev.raw.get('address', {}).get('suburb', "Marburg")
+        return {"gdf": gdf, "ort": ort, "name": s_clean, "original": strasse_input, "success": True}
+    except: return {"success": False}
+
 if st.button("🔥 ANALYSE STARTEN", type="primary"):
     st.session_state.run_processing, st.session_state.stop_requested = True, False
 
-# --- 5. LOOP ---
 if st.session_state.run_processing:
     temp_ort = defaultdict(list)
     total = len(st.session_state.saved_manual_streets)
@@ -114,25 +137,19 @@ if st.session_state.run_processing:
     st.session_state.run_processing = False
     st.rerun()
 
-# --- 6. KARTE MIT MOUSE-OVER (TOOLTIP) ---
+# --- 6. KARTE MIT TOOLTIP ---
 if st.session_state.ort_sammlung:
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
     for ort, items in st.session_state.ort_sammlung.items():
         color = st.session_state.colors.get(ort, "#FF0000")
         fg = folium.FeatureGroup(name=ort)
         for itm in items:
-            # Das Tooltip-Feature für Mouse-Over:
             folium.GeoJson(
                 itm["gdf"].__geo_interface__,
-                style_function=lambda x, c=color: {
-                    'color': c, 
-                    'weight': line_weight, 
-                    'opacity': 0.7
-                },
-                highlight_function=lambda x: {'weight': line_weight + 3, 'opacity': 1}, # Effekt bei Mouse-Over
-                tooltip=folium.Tooltip(f"<b>{itm['name']}</b><br>Ortsteil: {ort}") # Das eigentliche Mouse-Over
+                style_function=lambda x, c=color: {'color': c, 'weight': line_weight, 'opacity': 0.7},
+                highlight_function=lambda x: {'weight': line_weight + 3, 'opacity': 1},
+                tooltip=folium.Tooltip(f"<b>{itm['name']}</b><br>Ortsteil: {ort}")
             ).add_to(fg)
         fg.add_to(m)
-    
     folium.LayerControl().add_to(m)
     components.html(m._repr_html_(), height=600)
