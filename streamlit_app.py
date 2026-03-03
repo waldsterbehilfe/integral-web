@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 from difflib import get_close_matches
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-INSTANT"
+SERIAL_NUMBER = "SN-029-GOLD3002-CLEAN"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="🚀")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +22,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_instant_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_clean_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. PERSISTENZ & CACHE ---
 def load_json_cache(filepath):
@@ -79,7 +79,6 @@ def validate_with_cache(input_street, street_cache):
     return input_street
 
 # --- 4. SESSION STATE INITIALISIERUNG ---
-# WICHTIG: Erst initialisieren, bevor UI-Elemente darauf zugreifen
 if 'saved_manual_streets' not in st.session_state:
     st.session_state.saved_manual_streets = load_streets()
 if 'run_processing' not in st.session_state:
@@ -89,7 +88,7 @@ if 'stop_requested' not in st.session_state:
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
 
-# --- 5. CALLBACKS FÜR STABILE ÜBERGABE ---
+# --- 5. CALLBACKS ---
 def start_analysis():
     if st.session_state.saved_manual_streets:
         st.session_state.run_processing = True
@@ -103,9 +102,9 @@ def clear_list():
 
 # --- 6. UI HEADER ---
 st.title("🚀 INTEGRAL PRO")
-st.markdown(f"**Edition:** TITANIUM-INSTANT | **Einträge:** {len(st.session_state.saved_manual_streets)}")
+st.markdown(f"**Edition:** CLEAN-PRECISION | **Einträge:** {len(st.session_state.saved_manual_streets)}")
 
-# --- 7. ANALYSE-BLOCK (MUSS VOR DEM UPLOADER STEHEN FÜR INSTANT-START) ---
+# --- 7. ANALYSE-BLOCK (INSTANT START LOGIK) ---
 if st.session_state.run_processing:
     st.divider()
     results = defaultdict(list)
@@ -122,7 +121,7 @@ if st.session_state.run_processing:
             st.rerun()
 
     with col_spin:
-        with st.spinner("🚀 Analyse läuft aktiv..."):
+        with st.spinner("🚀 Präzisions-Analyse läuft..."):
             st_info = st.empty()
             for i, s in enumerate(current_list):
                 if st.session_state.stop_requested: break
@@ -134,17 +133,12 @@ if st.session_state.run_processing:
                 s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', v_name).strip()
                 
                 try:
+                    # Hoher Radius (1600m) für maximale Straßenabdeckung
                     gdf = ox.features_from_address(f"{s_cl}, Marburg-Biedenkopf", tags={"highway": True}, dist=1600)
                     if not gdf.empty:
+                        # Filtert nur die gesuchte Straße heraus
                         gdf = gdf[gdf['name'].str.contains(s_cl, case=False, na=False)].to_crs(epsg=4326)
                         if not gdf.empty:
-                            m_pos = None
-                            if hnr:
-                                try:
-                                    l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
-                                    if l: m_pos = (l.latitude, l.longitude)
-                                except: pass
-                            
                             cent = gdf.geometry.unary_union.centroid
                             ckey = f"{round(cent.y, 4)},{round(cent.x, 4)}"
                             
@@ -158,7 +152,7 @@ if st.session_state.run_processing:
                                 except: ort = "Marburg-Region"
                             else: ort = ort_cache[ckey]
                             
-                            results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
+                            results[ort].append({"gdf": gdf, "name": s_cl, "orig": s})
                 except: pass
                 
                 if (time.time() - start_t) > 0.3: time.sleep(1.05)
@@ -168,8 +162,8 @@ if st.session_state.run_processing:
             if not st.session_state.stop_requested: st.balloons()
             st.rerun()
 
-# --- 8. UI CONTROLS (NACH DEM ANALYSE-BLOCK) ---
-with st.expander("⚙️ Experten-Werkzeuge"):
+# --- 8. UI CONTROLS ---
+with st.expander("⚙️ Experten-Werkzeuge & Listen-Editor"):
     df_edit = pd.DataFrame({"Eintrag": st.session_state.saved_manual_streets})
     edited_df = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True)
     if st.button("💾 Liste synchronisieren"):
@@ -178,7 +172,7 @@ with st.expander("⚙️ Experten-Werkzeuge"):
         st.rerun()
 
 with st.container(border=True):
-    up = st.file_uploader("*.txt Dateien hochladen", type=["txt"], accept_multiple_files=True)
+    up = st.file_uploader("*.txt Dateien importieren", type=["txt"], accept_multiple_files=True)
     if up:
         new_raw = []
         for f in up:
@@ -190,12 +184,14 @@ with st.container(border=True):
 
     c_btn1, c_btn2 = st.columns(2)
     c_btn1.button("🗑️ Liste leeren", on_click=clear_list, use_container_width=True)
-    c_btn2.button("🔥 ANALYSE JETZT STARTEN", type="primary", on_click=start_analysis, use_container_width=True)
+    c_btn2.button("🔥 ANALYSE STARTEN", type="primary", on_click=start_analysis, use_container_width=True)
 
-# --- 9. OUTPUT ---
+# --- 9. OUTPUT (MAP OHNE POI MARKER) ---
 if st.session_state.ort_sammlung:
     st.divider()
-    st.subheader("🗺️ Analyse-Karte (Mouseover aktiv)")
+    st.subheader("🗺️ Interaktive Karte (Mouseover aktiv)")
+    
+    # Nutze CartoDB Positron für eine saubere Karte ohne eigene POIs
     m = folium.Map(location=[50.81, 8.77], zoom_start=12, tiles="cartodbpositron")
     all_pts = []
     
@@ -203,15 +199,17 @@ if st.session_state.ort_sammlung:
         fg = folium.FeatureGroup(name=ort)
         color = "#%06x" % random.randint(0, 0xFFFFFF)
         for itm in items:
+            # NUR DIE STRASSEN-GEOMETRIE MIT TOOLTIP (MOUSEOVER)
             folium.GeoJson(
                 itm["gdf"].__geo_interface__,
-                style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
-                tooltip=f"Straße: {itm['name']} ({ort})"
+                style_function=lambda x, c=color: {'color': c, 'weight': 7, 'opacity': 0.85},
+                tooltip=f"Straße: {itm['name']} (Ort: {ort})"
             ).add_to(fg)
-            for c in itm["gdf"].geometry.unary_union.envelope.exterior.coords: all_pts.append([c[1], c[0]])
-            if itm["marker"]:
-                folium.Marker(itm["marker"], icon=folium.Icon(color="red"), tooltip=f"Ziel: {itm['orig']}").add_to(fg)
-                all_pts.append(itm["marker"])
+            
+            # Für Zoom-Berechnung
+            for c in itm["gdf"].geometry.unary_union.envelope.exterior.coords: 
+                all_pts.append([c[1], c[0]])
+                
         fg.add_to(m)
     
     if all_pts: m.fit_bounds(all_pts)
