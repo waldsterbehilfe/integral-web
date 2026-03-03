@@ -22,7 +22,7 @@ ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
 
-# --- 2. CACHE-LOGIK (DATEI) ---
+# --- 2. CACHE-LOGIK ---
 def load_streets():
     if os.path.exists(STREETS_FILE):
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
@@ -43,133 +43,92 @@ if 'stop_requested' not in st.session_state:
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
 
-# --- 4. UI: HEADER & STATISTIK ---
+# --- 4. UI: HEADER & CACHE-INFO ---
 st.title("🚀 INTEGRAL PRO")
-cache_anzahl = len(st.session_state.saved_manual_streets)
-st.info(f"**Cache-Status:** {cache_anzahl} Straßeneinträge im System.")
+st.info(f"**Cache-Status:** {len(st.session_state.saved_manual_streets)} Straßen geladen.")
 
-# --- 5. INPUT-SEKTION (SOFORT-UPDATE) ---
+# --- 5. INPUT-SEKTION ---
 with st.container(border=True):
     col_in, col_list = st.columns([1, 1])
-
     with col_in:
-        st.subheader("📥 Daten-Import")
-        
-        # Manueller Input
-        with st.expander("Manuelle Eingabe", expanded=True):
-            c1, c2 = st.columns([3, 1])
-            m_str = c1.text_input("Straße", placeholder="Hauptstraße", key="m_str")
-            m_hnr = c2.text_input("Hnr", placeholder="10", key="m_hnr")
-            if st.button("➕ Hinzufügen", use_container_width=True):
-                if m_str:
-                    entry = f"{m_str} | {m_hnr}".strip(" |")
-                    if entry not in st.session_state.saved_manual_streets:
-                        st.session_state.saved_manual_streets.append(entry)
-                        save_streets(st.session_state.saved_manual_streets)
-                        st.rerun()
+        st.subheader("📥 Import & Manuell")
+        c1, c2 = st.columns([3, 1])
+        m_str = c1.text_input("Straße", key="m_str")
+        m_hnr = c2.text_input("Hnr", key="m_hnr")
+        if st.button("➕ Hinzufügen", use_container_width=True):
+            if m_str:
+                entry = f"{m_str} | {m_hnr}".strip(" |")
+                if entry not in st.session_state.saved_manual_streets:
+                    st.session_state.saved_manual_streets.append(entry)
+                    save_streets(st.session_state.saved_manual_streets)
+                    st.rerun()
 
-        # TXT Upload (Sofortige Verarbeitung)
-        uploaded = st.file_uploader("*.txt Datei hochladen", type=["txt"], accept_multiple_files=True)
+        uploaded = st.file_uploader("*.txt hochladen", type=["txt"], accept_multiple_files=True)
         if uploaded:
             new_entries = []
             for f in uploaded:
                 lines = f.getvalue().decode("utf-8").splitlines()
                 new_entries.extend([l.strip() for l in lines if l.strip()])
-            
-            old_list = st.session_state.saved_manual_streets
-            combined = sorted(list(set(old_list + new_entries)))
-            
-            if len(combined) > len(old_list):
-                st.session_state.saved_manual_streets = combined
-                save_streets(combined)
-                st.rerun()
+            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_entries)))
+            save_streets(st.session_state.saved_manual_streets)
+            st.rerun()
 
     with col_list:
         st.subheader("📝 Liste & Korrektur")
-        if st.session_state.saved_manual_streets:
-            df = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-            edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic", height=250)
-            
-            c_save, c_del = st.columns(2)
-            if c_save.button("💾 Änderungen speichern", use_container_width=True):
-                st.session_state.saved_manual_streets = edited_df["Eintrag"].tolist()
-                save_streets(st.session_state.saved_manual_streets)
-                st.rerun()
-                
-            if c_del.button("🗑️ Cache leeren", use_container_width=True):
-                st.session_state.saved_manual_streets = []
-                save_streets([])
-                st.rerun()
-        else:
-            st.warning("Die Liste ist aktuell leer.")
+        df = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
+        edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic", height=200)
+        c_save, c_del = st.columns(2)
+        if c_save.button("💾 Speichern", use_container_width=True):
+            st.session_state.saved_manual_streets = edited_df["Eintrag"].tolist()
+            save_streets(st.session_state.saved_manual_streets)
+            st.rerun()
+        if c_del.button("🗑️ Cache leeren", use_container_width=True):
+            st.session_state.saved_manual_streets = []
+            save_streets([])
+            st.rerun()
 
 # --- 6. STEUERUNG ---
 st.divider()
-col_run, col_stop = st.columns(2)
-
-if col_run.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
+c_run, c_stop = st.columns(2)
+if c_run.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
     st.session_state.run_processing = True
     st.session_state.stop_requested = False
     st.rerun()
-
-if col_stop.button("🛑 ABBRUCH", type="secondary", use_container_width=True):
+if c_stop.button("🛑 ABBRUCH", type="secondary", use_container_width=True):
     st.session_state.stop_requested = True
     st.session_state.run_processing = False
     st.rerun()
 
-# --- 7. ANALYSE-LOGIK (VOLLSTÄNDIG) ---
+# --- 7. ANALYSE ---
 if st.session_state.run_processing:
     results = defaultdict(list)
-    s_list = st.session_state.saved_manual_streets
-    
-    with st.status("Verarbeite Daten...", expanded=True) as status:
-        progress = st.progress(0)
+    with st.status("Verarbeite Geodaten...", expanded=True) as status:
+        p_bar = st.progress(0)
+        s_list = st.session_state.saved_manual_streets
         for i, s in enumerate(s_list):
-            if st.session_state.stop_requested:
-                break
-            
+            if st.session_state.stop_requested: break
             try:
-                # Parsing
                 s_name = s.split(" | ")[0]
-                hnr = s.split(" | ")[1] if " | " in s else None
                 s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', s_name).strip()
-                
-                # Geometrie
                 gdf = ox.features_from_address(f"{s_clean}, Marburg-Biedenkopf", tags={"highway": True}, dist=50)
                 if not gdf.empty:
                     gdf = gdf[gdf['name'].str.contains(s_clean, case=False, na=False)]
                     gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
-                    
                     if not gdf.empty:
-                        # Marker
-                        m_coords = None
-                        if hnr:
-                            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf")
-                            if loc: m_coords = (loc.latitude, loc.longitude)
-                        
-                        # Ortsteil
                         centroid = gdf.geometry.unary_union.centroid
                         loc_rev = geolocator.reverse((centroid.y, centroid.x), language='de')
-                        ort = loc_rev.raw.get('address', {}).get('village') or \
-                              loc_rev.raw.get('address', {}).get('suburb') or "Marburg"
-                        
-                        results[ort].append({"gdf": gdf, "name": s_clean, "original": s, "marker": m_coords})
-            except:
-                pass
-            
-            progress.progress((i + 1) / len(s_list))
-            time.sleep(1.1) # API-Schutz
-            
-        if st.session_state.stop_requested:
-            status.update(label="Analyse abgebrochen.", state="error")
-        else:
-            status.update(label="Analyse abgeschlossen!", state="complete")
-            st.session_state.ort_sammlung = dict(results)
-            st.session_state.run_processing = False
-            st.balloons()
-            st.rerun()
+                        ort = loc_rev.raw.get('address', {}).get('village', "Marburg")
+                        results[ort].append({"gdf": gdf, "name": s_clean})
+            except: pass
+            p_bar.progress((i + 1) / len(s_list))
+            time.sleep(1.1)
+        
+        st.session_state.ort_sammlung = dict(results)
+        st.session_state.run_processing = False
+        status.update(label="Analyse fertig!", state="complete")
+        st.rerun()
 
-# --- 8. KARTEN-AUSGABE ---
+# --- 8. KARTE MIT MOUSEOVER ---
 if st.session_state.ort_sammlung:
     st.subheader("🗺️ Ergebnis-Karte")
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
@@ -177,9 +136,13 @@ if st.session_state.ort_sammlung:
         fg = folium.FeatureGroup(name=ort)
         color = "#%06x" % random.randint(0, 0xFFFFFF)
         for itm in items:
-            folium.GeoJson(itm["gdf"].__geo_interface__, style_function=lambda x, c=color: {'color': c, 'weight': 5}).add_to(fg)
-            if itm["marker"]:
-                folium.Marker(itm["marker"], popup=itm["original"]).add_to(fg)
+            # Tooltip für Mouseover hinzufügen
+            folium.GeoJson(
+                itm["gdf"].__geo_interface__,
+                style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
+                highlight_function=lambda x: {'weight': 10, 'color': 'black', 'opacity': 1},
+                tooltip=folium.Tooltip(f"<b>Straße:</b> {itm['name']}<br><b>Ortsteil:</b> {ort}")
+            ).add_to(fg)
         fg.add_to(m)
     folium.LayerControl().add_to(m)
     components.html(m._repr_html_(), height=600)
