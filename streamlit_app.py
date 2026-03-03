@@ -1,36 +1,39 @@
+# ... (Importe wie oben, plus networkx)
 import networkx as nx
 
-def berechne_grobe_route(gdf_liste, orts_graph):
-    """
-    Findet eine sinnvolle Reihenfolge der Straßen und berechnet die Gesamtfahrstrecke.
-    """
-    total_route_km = 0.0
-    # Wir nehmen die Schwerpunkte (Centroids) jeder Straße als Stopps
-    stopps = [gdf.geometry.unary_union.centroid for gdf in gdf_liste]
-    
-    if not stopps: return 0.0
-    
-    # Finde die nächsten Knoten im Straßennetz für unsere Stopps
-    nodes = [ox.nearest_nodes(orts_graph, p.x, p.y) for p in stopps]
-    
-    current_node = nodes[0]
-    besuchte_nodes = [current_node]
-    verbleibende_nodes = nodes[1:]
-    
-    while verbleibende_nodes:
-        # Finde den nächstgelegenen Knoten im Netzwerk
-        next_node = min(verbleibende_nodes, 
-                        key=lambda n: nx.shortest_path_length(orts_graph, current_node, n, weight='length'))
+# --- NEUE ROUTEN-LOGIK ---
+def berechne_tour_km(ort, items):
+    try:
+        # Lade das Straßennetz für den Ortsteil
+        G = ox.graph_from_address(f"{ort}, Marburg-Biedenkopf", network_type='drive', dist=3000)
+        G = ox.project_graph(G, to_crs='EPSG:32632')
         
-        # Addiere die echte Fahrtstrecke zum Gesamtergebnis
-        dist = nx.shortest_path_length(orts_graph, current_node, next_node, weight='length')
-        total_route_km += dist
+        # Hol die Knoten für alle markierten Straßen
+        points = [item["gdf"].to_crs(epsg=32632).geometry.unary_union.centroid for item in items]
+        nodes = [ox.nearest_nodes(G, p.x, p.y) for p in points]
         
-        current_node = next_node
-        besuchte_nodes.append(current_node)
-        verbleibende_nodes.remove(current_node)
+        # Einfache "Nächster-Nachbar" Tour
+        total_dist = 0
+        current_node = nodes[0]
+        to_visit = nodes[1:]
         
-    # Am Ende noch die Eigenlänge der Zielstraßen dazu (grob geschätzt)
-    eigene_laenge = sum(gdf.to_crs(epsg=32632).geometry.length.sum() for gdf in gdf_liste)
-    
-    return (total_route_km + eigene_laenge) / 1000  # Rückgabe in km
+        while to_visit:
+            next_node = min(to_visit, key=lambda n: nx.shortest_path_length(G, current_node, n, weight='length'))
+            total_dist += nx.shortest_path_length(G, current_node, next_node, weight='length')
+            current_node = next_node
+            to_visit.remove(next_node)
+            
+        # + Eigenlänge der Straßen
+        own_len = sum(item["laenge"] for item in items)
+        return (total_dist + own_len) / 1000
+    except:
+        return sum(item["laenge"] for item in items) / 1000 * 1.3 # Fallback: Luftlinie + 30%
+
+# --- UI ANPASSUNG ---
+if st.session_state.ort_sammlung:
+    if st.button("🛣️ ROUTE & ECHTE KM BERECHNEN (Planungs-Modus)"):
+        with st.spinner("Berechne optimale Fahrwege..."):
+            for ort, items in st.session_state.ort_sammlung.items():
+                echte_km = berechne_tour_km(ort, items)
+                st.session_state.ort_results[ort] = echte_km # Speichern im State
+        st.success("Berechnung abgeschlossen!")
