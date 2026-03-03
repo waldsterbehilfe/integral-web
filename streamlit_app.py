@@ -32,8 +32,11 @@ geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
 
 # --- 2. HILFSFUNKTIONEN FÜR DIE LISTE ---
 def save_streets_to_disk(streets):
+    # Bereinigen, Sortieren und Speichern
+    clean_list = sorted(list(set([s.strip() for s in streets if s.strip()])))
     with open(STREETS_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(sorted(list(set(streets)))))
+        f.write("\n".join(clean_list))
+    return clean_list
 
 def load_streets_from_disk():
     if os.path.exists(STREETS_FILE):
@@ -79,30 +82,38 @@ c1, c2 = st.columns(2)
 with c1:
     with st.container(border=True):
         st.subheader("📥 Input")
-        u_file = st.file_uploader("TXT Datei laden", type=["txt"])
-        if u_file:
-            lines = [l.strip() for l in u_file.getvalue().decode("utf-8").splitlines() if l.strip()]
-            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + lines)))
-            save_streets_to_disk(st.session_state.saved_manual_streets)
+        
+        # DATEI UPLOAD MIT DIREKTER AKTUALISIERUNG
+        u_file = st.file_uploader("TXT Datei laden", type=["txt"], key="file_input")
+        if u_file is not None:
+            # Dateiinhalt lesen
+            new_content = u_file.getvalue().decode("utf-8").splitlines()
+            new_streets = [l.strip() for l in new_content if l.strip()]
+            
+            # Mit bestehender Liste kombinieren
+            combined = st.session_state.saved_manual_streets + new_streets
+            # Speichern und State aktualisieren
+            st.session_state.saved_manual_streets = save_streets_to_disk(combined)
+            # WICHTIG: Seite sofort neu laden, damit die Liste rechts erscheint
             st.rerun()
         
         st.divider()
-        q_str = st.text_input("Straße hinzufügen:", placeholder="z.B. Bachweg")
-        q_hnr = st.text_input("Hausnummer (optional):", placeholder="z.B. 12")
+        q_str = st.text_input("Manuelle Eingabe:", placeholder="Straße eingeben...")
+        q_hnr = st.text_input("Hausnummer:", placeholder="optional")
         
         if st.button("➕ Hinzufügen"):
             if q_str:
                 neuer_eintrag = f"{q_str} | {q_hnr}" if q_hnr else q_str
-                if neuer_eintrag not in st.session_state.saved_manual_streets:
-                    st.session_state.saved_manual_streets.append(neuer_eintrag)
-                    st.session_state.saved_manual_streets.sort()
-                    save_streets_to_disk(st.session_state.saved_manual_streets)
-                    st.rerun() # Aktualisiert die Liste sofort
+                st.session_state.saved_manual_streets.append(neuer_eintrag)
+                st.session_state.saved_manual_streets = save_streets_to_disk(st.session_state.saved_manual_streets)
+                st.rerun()
 
 with c2:
     with st.container(border=True):
         st.subheader("📝 Liste")
+        # DataFrame Anzeige der aktuellen Liste
         st.dataframe(st.session_state.saved_manual_streets, use_container_width=True, height=250)
+        
         if st.button("🗑️ Liste leeren"):
             st.session_state.saved_manual_streets = []
             if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
