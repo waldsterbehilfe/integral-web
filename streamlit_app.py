@@ -20,18 +20,17 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_pro_auto_{random.randint(100,999)}", timeout=10)
+geolocator = Nominatim(user_agent=f"integral_pro_v6_{random.randint(100,999)}", timeout=10)
 
 # --- 2. HILFSFUNKTIONEN ---
-def check_similarity(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
 def get_internet_verified(query):
+    """Schnelle Validierung mit Error-Handling."""
     try:
-        results = geolocator.geocode(f"{query}, Marburg-Biedenkopf", exactly_one=False, limit=1, addressdetails=True)
+        results = geolocator.geocode(f"{query}, Marburg-Biedenkopf", exactly_one=False, limit=1)
         if results:
             return results[0].address.split(',')[0].strip()
-    except: pass
+    except Exception:
+        pass
     return None
 
 # --- 3. PERSISTENZ ---
@@ -54,64 +53,70 @@ with h_col2:
     st.markdown("**INTEGRAL PRO**")
 st.divider()
 
-# --- 5. DATEI-IMPORT MIT HINTERGRUND-VALIDIERUNG ---
-uploaded_files = st.file_uploader("*.txt Dateien importieren (Auto-Validierung aktiv)", type=["txt"], accept_multiple_files=True)
+# --- 5. DATEI-IMPORT MIT FORTSCHRITT & SPEED-LOGIK ---
+uploaded_files = st.file_uploader("*.txt Dateien importieren", type=["txt"], accept_multiple_files=True)
 if uploaded_files:
     new_verified = []
-    with st.status("Validiere Import-Daten...", expanded=True) as status:
-        for f in uploaded_files:
-            lines = f.getvalue().decode("utf-8").splitlines()
-            for line in lines:
-                raw = line.strip()
-                if not raw: continue
+    raw_lines = []
+    for f in uploaded_files:
+        raw_lines.extend([l.strip() for l in f.getvalue().decode("utf-8").splitlines() if l.strip()])
+    
+    total_lines = len(raw_lines)
+    if total_lines > 0:
+        with st.status(f"Importiere {total_lines} Einträge...", expanded=True) as status:
+            prog_bar = st.progress(0)
+            for i, line in enumerate(raw_lines):
+                # Anzeige: X von Y
+                status.write(f"Prüfe Datensatz {i+1} von {total_lines}: `{line}`")
                 
-                # Wenn schon im Cache: übernehmen
-                if any(raw in s for s in st.session_state.saved_manual_streets):
-                    new_verified.append(raw)
-                    continue
+                # Speed-Check: Wenn exakt im Cache, überspringen
+                if line in st.session_state.saved_manual_streets:
+                    new_verified.append(line)
+                else:
+                    # Nur bei unbekannten Daten Internet-Check (mit Spinner)
+                    s_name = line.split("|")[0].strip()
+                    verified_name = get_internet_verified(s_name)
+                    if verified_name:
+                        hnr = line.split("|")[1].strip() if "|" in line else ""
+                        new_verified.append(f"{verified_name} | {hnr}".strip(" |"))
+                        time.sleep(0.8) # Schutz für API
                 
-                # Sonst: Kurz-Check Internet
-                s_name = raw.split("|")[0].strip()
-                verified_name = get_internet_verified(s_name)
-                if verified_name:
-                    hnr = raw.split("|")[1].strip() if "|" in raw else ""
-                    entry = f"{verified_name} | {hnr}".strip(" |")
-                    new_verified.append(entry)
-                    time.sleep(1.0) # API Schutz
-        
-        # Merge & Save
-        updated = sorted(list(set(st.session_state.saved_manual_streets + new_verified)))
-        st.session_state.saved_manual_streets = updated
-        with open(STREETS_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(st.session_state.saved_manual_streets))
-        status.update(label="Import & Validierung abgeschlossen!", state="complete")
+                prog_bar.progress((i + 1) / total_lines)
+            
+            # Speichern & Sync
+            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_verified)))
+            with open(STREETS_FILE, "w", encoding="utf-8") as f:
+                f.write("\n".join(st.session_state.saved_manual_streets))
+            status.update(label="✅ Import abgeschlossen!", state="complete")
         st.rerun()
 
-# --- 6. MANUELLE EINGABE & LISTE ---
+# --- 6. MANUELLE EINGABE & CACHE ---
 with st.container(border=True):
     col_in, col_list = st.columns([1, 1])
     with col_in:
-        st.subheader("📥 Einzelprüfung")
+        st.subheader("📥 Manuelle Prüfung")
         m_s = st.text_input("Straße")
         m_h = st.text_input("Hnr")
         if st.button("Hinzufügen"):
-            if m_s:
+            with st.spinner("Validiere..."):
                 v_name = get_internet_verified(m_s) or m_s
-                st.session_state.saved_manual_streets.append(f"{v_name} | {m_h}".strip(" |"))
-                with open(STREETS_FILE, "w", encoding="utf-8") as f:
-                    f.write("\n".join(st.session_state.saved_manual_streets))
+                entry = f"{v_name} | {m_h}".strip(" |")
+                if entry not in st.session_state.saved_manual_streets:
+                    st.session_state.saved_manual_streets.append(entry)
+                    with open(STREETS_FILE, "w", encoding="utf-8") as f:
+                        f.write("\n".join(st.session_state.saved_manual_streets))
                 st.rerun()
 
     with col_list:
-        st.subheader("📝 Verifizierter Cache")
+        st.subheader("📝 Lokale Liste")
         df = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-        edited_df = st.data_editor(df, use_container_width=True, height=200)
-        if st.button("🗑️ Cache leeren"):
+        st.data_editor(df, use_container_width=True, height=200)
+        if st.button("🗑️ Liste leeren"):
             st.session_state.saved_manual_streets = []
             if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
             st.rerun()
 
-# --- 7. ANALYSE-ENGINE ---
+# --- 7. ANALYSE-ENGINE MIT FORTSCHRITT ---
 st.divider()
 c_go, c_st = st.columns(2)
 if c_go.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
@@ -123,9 +128,11 @@ if c_st.button("🛑 STOPP", type="secondary", use_container_width=True):
 
 if st.session_state.run_processing:
     results = defaultdict(list)
-    with st.status("Berechne Geometrien...", expanded=True) as status:
+    total_analysis = len(st.session_state.saved_manual_streets)
+    with st.status(f"Berechne Geometrien (0 von {total_analysis})...", expanded=True) as status:
         p_bar = st.progress(0)
         for i, s in enumerate(st.session_state.saved_manual_streets):
+            status.write(f"Analysiere {i+1}/{total_analysis}: **{s}**")
             try:
                 s_name = s.split("|")[0].strip()
                 hnr = s.split("|")[1].strip() if "|" in s else None
@@ -144,7 +151,7 @@ if st.session_state.run_processing:
                               rv.raw.get('address', {}).get('suburb') or "Marburg"
                         results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos})
             except: pass
-            p_bar.progress((i + 1) / len(st.session_state.saved_manual_streets))
+            p_bar.progress((i + 1) / total_analysis)
             time.sleep(1.1)
         st.session_state.ort_sammlung = dict(results)
         st.session_state.run_processing = False
@@ -153,19 +160,20 @@ if st.session_state.run_processing:
 
 # --- 8. KARTE ---
 if st.session_state.ort_sammlung:
-    m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
-    for ort, items in st.session_state.ort_sammlung.items():
-        fg = folium.FeatureGroup(name=ort)
-        color = "#%06x" % random.randint(0, 0xFFFFFF)
-        for itm in items:
-            folium.GeoJson(
-                itm["gdf"].__geo_interface__,
-                style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.7},
-                highlight_function=lambda x: {'weight': 10, 'color': 'black'},
-                tooltip=folium.Tooltip(f"<b>{itm['name']}</b> ({ort})")
-            ).add_to(fg)
-            if itm["marker"]:
-                folium.Marker(itm["marker"], icon=folium.Icon(color="red")).add_to(fg)
-        fg.add_to(m)
-    folium.LayerControl().add_to(m)
-    components.html(m._repr_html_(), height=600)
+    with st.spinner("Karte wird gerendert..."):
+        m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
+        for ort, items in st.session_state.ort_sammlung.items():
+            fg = folium.FeatureGroup(name=ort)
+            color = "#%06x" % random.randint(0, 0xFFFFFF)
+            for itm in items:
+                folium.GeoJson(
+                    itm["gdf"].__geo_interface__,
+                    style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.7},
+                    highlight_function=lambda x: {'weight': 10, 'color': 'black'},
+                    tooltip=folium.Tooltip(f"<b>{itm['name']}</b> ({ort})")
+                ).add_to(fg)
+                if itm["marker"]:
+                    folium.Marker(itm["marker"], icon=folium.Icon(color="red")).add_to(fg)
+            fg.add_to(m)
+        folium.LayerControl().add_to(m)
+        components.html(m._repr_html_(), height=600)
