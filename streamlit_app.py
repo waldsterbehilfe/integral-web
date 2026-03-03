@@ -20,9 +20,10 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=10)
+# User-Agent leicht variiert für bessere API-Akzeptanz
+geolocator = Nominatim(user_agent=f"integral_pro_v3_{random.randint(100,999)}", timeout=10)
 
-# --- 2. PERSISTENZ-FUNKTIONEN (CACHE) ---
+# --- 2. PERSISTENZ ---
 def load_streets():
     if os.path.exists(STREETS_FILE):
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
@@ -43,7 +44,7 @@ if 'stop_requested' not in st.session_state:
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
 
-# --- 4. SOFORT-IMPORT (TXT) ---
+# --- 4. IMPORT-TRIGGER ---
 uploaded_files = st.file_uploader("*.txt Datei für Sofort-Import", type=["txt"], accept_multiple_files=True)
 if uploaded_files:
     new_data = []
@@ -56,7 +57,7 @@ if uploaded_files:
         save_streets(updated)
         st.rerun()
 
-# --- 5. UI: INPUT MIT SPEED-LAYER & PLAUSIBILITÄT ---
+# --- 5. UI: INPUT MIT ANTI-CRASH PRÜFUNG ---
 st.title("🚀 INTEGRAL PRO")
 st.info(f"**Lokaler Cache:** {len(st.session_state.saved_manual_streets)} bekannte Einträge.")
 
@@ -71,30 +72,34 @@ with st.container(border=True):
         if st.button("✅ Hinzufügen / Prüfen", use_container_width=True):
             if m_s:
                 full_entry = f"{m_s} | {m_h}".strip(" |")
-                # SPEED-LAYER: Sofort-Check
                 if full_entry in st.session_state.saved_manual_streets:
-                    st.success(f"'{full_entry}' bereits im Cache.")
+                    st.success("Bereits im Cache.")
                 else:
-                    # PLAUSIBILITÄT: Nur online prüfen, wenn neu
-                    with st.spinner("Prüfe Existenz..."):
-                        test_loc = geolocator.geocode(f"{m_s}, Marburg-Biedenkopf")
-                        if test_loc:
-                            st.session_state.saved_manual_streets.append(full_entry)
-                            save_streets(st.session_state.saved_manual_streets)
-                            st.rerun()
-                        else:
-                            st.error("Straße nicht gefunden. Schreibfehler?")
+                    try:
+                        with st.spinner("Prüfe Straße..."):
+                            test_loc = geolocator.geocode(f"{m_s}, Marburg-Biedenkopf")
+                            if test_loc:
+                                st.session_state.saved_manual_streets.append(full_entry)
+                                save_streets(st.session_state.saved_manual_streets)
+                                st.rerun()
+                            else:
+                                st.error("Straße nicht gefunden.")
+                    except Exception:
+                        st.warning("Dienst antwortet nicht. Speichere trotzdem...")
+                        st.session_state.saved_manual_streets.append(full_entry)
+                        save_streets(st.session_state.saved_manual_streets)
+                        st.rerun()
 
     with col_list:
         st.subheader("📝 Lokale Liste")
         df = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
         edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic", height=200)
         c_sv, c_cl = st.columns(2)
-        if c_sv.button("💾 Liste korrigieren", use_container_width=True):
+        if c_sv.button("💾 Speichern", use_container_width=True):
             st.session_state.saved_manual_streets = edited_df["Eintrag"].tolist()
             save_streets(st.session_state.saved_manual_streets)
             st.rerun()
-        if c_cl.button("🗑️ Cache leeren", use_container_width=True):
+        if c_cl.button("🗑️ Leeren", use_container_width=True):
             st.session_state.saved_manual_streets = []
             save_streets([])
             st.rerun()
@@ -111,7 +116,7 @@ if c_st.button("🛑 ABBRUCH", type="secondary", use_container_width=True):
     st.session_state.run_processing = False
     st.rerun()
 
-# --- 7. ANALYSE-ENGINE ---
+# --- 7. ANALYSE-ENGINE (ROBUST) ---
 if st.session_state.run_processing:
     results = defaultdict(list)
     s_list = st.session_state.saved_manual_streets
@@ -124,38 +129,37 @@ if st.session_state.run_processing:
                 hnr = s.split(" | ")[1] if " | " in s else None
                 s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', s_name).strip()
                 
-                # OSMnx Abfrage
                 gdf = ox.features_from_address(f"{s_cl}, Marburg-Biedenkopf", tags={"highway": True}, dist=50)
                 if not gdf.empty:
                     gdf = gdf[gdf['name'].str.contains(s_cl, case=False, na=False)].to_crs(epsg=4326)
                     if not gdf.empty:
-                        # Marker-Position bei Hausnummer
                         m_pos = None
                         if hnr:
-                            l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
-                            if l: m_pos = (l.latitude, l.longitude)
+                            try:
+                                l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
+                                if l: m_pos = (l.latitude, l.longitude)
+                            except: pass
                         
-                        # Ortsteil-Bestimmung
                         cent = gdf.geometry.unary_union.centroid
-                        rv = geolocator.reverse((cent.y, cent.x), language='de')
-                        ort = rv.raw.get('address', {}).get('village') or \
-                              rv.raw.get('address', {}).get('suburb') or "Marburg-Land"
+                        try:
+                            rv = geolocator.reverse((cent.y, cent.x), language='de')
+                            ort = rv.raw.get('address', {}).get('village') or \
+                                  rv.raw.get('address', {}).get('suburb') or "Marburg-Land"
+                        except: ort = "Unbekannt"
                         
                         results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
-            except: pass
+            except Exception: pass # Fehler bei einzelner Straße ignorieren
             p_bar.progress((i + 1) / len(s_list))
-            time.sleep(1.1) # Schutz vor API-Sperre
+            time.sleep(1.1)
         
         st.session_state.ort_sammlung = dict(results)
         st.session_state.run_processing = False
         status.update(label="Analyse abgeschlossen!", state="complete")
         st.rerun()
 
-# --- 8. VISUALISIERUNG (KARTE) ---
+# --- 8. KARTE ---
 if st.session_state.ort_sammlung:
-    st.subheader("🗺️ Ergebnis-Karte (Mouseover aktiv)")
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
-    
     for ort, items in st.session_state.ort_sammlung.items():
         fg = folium.FeatureGroup(name=ort)
         color = "#%06x" % random.randint(0, 0xFFFFFF)
@@ -164,11 +168,10 @@ if st.session_state.ort_sammlung:
                 itm["gdf"].__geo_interface__,
                 style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.7},
                 highlight_function=lambda x: {'weight': 10, 'color': 'black'},
-                tooltip=folium.Tooltip(f"<b>{itm['name']}</b><br>Ort: {ort}")
+                tooltip=folium.Tooltip(f"<b>{itm['name']}</b> ({ort})")
             ).add_to(fg)
             if itm["marker"]:
-                folium.Marker(itm["marker"], icon=folium.Icon(color="red"), popup=itm["orig"]).add_to(fg)
+                folium.Marker(itm["marker"], icon=folium.Icon(color="red")).add_to(fg)
         fg.add_to(m)
-    
     folium.LayerControl().add_to(m)
     components.html(m._repr_html_(), height=600)
