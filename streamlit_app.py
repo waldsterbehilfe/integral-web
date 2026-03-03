@@ -10,8 +10,11 @@ from datetime import datetime
 from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
+# --- 0. SERIENNUMMER ---
+SERIAL_NUMBER = "SN-002" 
+
 # --- 1. SETUP & THEME ---
-st.set_page_config(page_title="INTEGRAL PRO", layout="wide", page_icon="📈")
+st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide", page_icon="📈")
 
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
@@ -22,18 +25,37 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
 
-geolocator = Nominatim(user_agent="integral_pro_v63_turbo")
+# --- DATEI FÜR MANUELLE LISTEN ---
+STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-# Session State
+geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}")
+
+# --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
+def save_streets(streets_list):
+    with open(STREETS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(streets_list))
+
+def load_streets():
+    if os.path.exists(STREETS_FILE):
+        with open(STREETS_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
+    return []
+
+# Session State - Initialisierung
 if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
 if 'fehler_liste' not in st.session_state: st.session_state.fehler_liste = []
 if 'run_processing' not in st.session_state: st.session_state.run_processing = False
 if 'stop_requested' not in st.session_state: st.session_state.stop_requested = False
-if 'manual_text' not in st.session_state: st.session_state.manual_text = ""
+if 'uploaded_streets' not in st.session_state: st.session_state.uploaded_streets = []
+# Lade gespeicherte Straßen beim Start
+if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = load_streets()
+# Für Vorschläge aus dem Internet
+if 'online_suggestions' not in st.session_state: st.session_state.online_suggestions = []
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Einstellungen")
+    st.markdown(f"**Version:** `{SERIAL_NUMBER}`")
     st.divider()
     selected_colors = {}
     if st.session_state.ort_sammlung:
@@ -44,36 +66,53 @@ with st.sidebar:
     if st.button("🗑️ Geocache leeren", use_container_width=True):
         shutil.rmtree(CACHE_DIR)
         os.makedirs(CACHE_DIR, exist_ok=True)
+        st.success("Geocache gelöscht.")
+        st.rerun()
+    if st.button("🗑️ Manuelle Liste leeren", use_container_width=True):
+        if os.path.exists(STREETS_FILE):
+            os.remove(STREETS_FILE)
+        st.session_state.saved_manual_streets = []
+        st.success("Manuelle Liste gelöscht.")
         st.rerun()
 
 # Hintergrundfarbe
 st.markdown("<style>.stApp {background-color: #0E1117;}</style>", unsafe_allow_html=True)
 
-# --- TURBO-FUNKTION ---
+# --- FUNKTION (MIT HAUSNUMMERN-SUPPORT) ---
 def verarbeite_strasse(strasse):
     if not strasse: return {"success": False}
-    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse).strip()
+    
+    # Hausnummer-Erkennung
+    hnr = None
+    hnr_match = re.search(r'\s(\d+[a-zA-Z]?)', strasse)
+    if hnr_match:
+        hnr = hnr_match.group(1)
+        strasse_name = strasse.replace(hnr_match.group(0), '').strip()
+    else:
+        strasse_name = strasse.strip()
+
+    s_clean = re.sub(r'(?i)\bstr\b\.?', 'Straße', strasse_name).strip()
     query = f"{s_clean}, Marburg-Biedenkopf"
     
     try:
-        # Exakte Suche (Caching erledigt hier die Hauptarbeit)
         gdf = ox.features_from_address(query, tags={"highway": True}, dist=100)
-        
-        # Filter
         if not gdf.empty and 'name' in gdf.columns:
             gdf = gdf[gdf['name'].str.contains(s_clean.split()[0], case=False, na=False)]
+
+        marker_coords = None
+        if hnr and not gdf.empty:
+            loc = geolocator.geocode(f"{s_clean} {hnr}, Marburg-Biedenkopf", timeout=5)
+            if loc:
+                marker_coords = (loc.latitude, loc.longitude)
 
         if not gdf.empty:
             gdf = gdf[gdf.geometry.type.isin(['LineString', 'MultiLineString'])].to_crs(epsg=4326)
             osm_name = gdf['name'].iloc[0] if 'name' in gdf.columns else s_clean
             
-            # --- Turbo Ortsteil Bestimmung ---
             ortsteil = "Unbekannt"
-            # Versuche den Ortsteil aus den OSM-Tags zu lesen (schneller als Reverse Geocoding)
             if 'is_in:suburb' in gdf.columns: ortsteil = gdf['is_in:suburb'].iloc[0]
             elif 'is_in:village' in gdf.columns: ortsteil = gdf['is_in:village'].iloc[0]
             
-            # Fallback falls Tag fehlt (nur 1 API Aufruf statt 2 pro Straße)
             if ortsteil == "Unbekannt":
                 try:
                     centroid = gdf.geometry.unary_union.centroid
@@ -83,7 +122,14 @@ def verarbeite_strasse(strasse):
                         ortsteil = a.get('village') or a.get('suburb') or a.get('hamlet') or a.get('town') or "Unbekannt"
                 except: pass
             
-            return {"gdf": gdf, "ort": ortsteil, "name": osm_name, "original": strasse, "success": True}
+            return {
+                "gdf": gdf, 
+                "ort": ortsteil, 
+                "name": osm_name, 
+                "original": strasse, 
+                "marker": marker_coords, 
+                "success": True
+            }
     except:
         pass
     return {"success": False, "original": strasse}
@@ -93,34 +139,79 @@ col_logo, col_title = st.columns([1, 10])
 with col_logo: st.image(LOGO_URL, width=120)
 with col_title:
     st.title("INTEGRAL PRO")
-    st.markdown("Automatisierte Sortierung — **V6.3 (Turbo)**")
+    st.markdown(f"Automatisierte Sortierung — **V7.7 (Serialized {SERIAL_NUMBER})**")
 
 st.divider()
-col_in1, col_in2 = st.columns(2)
-with col_in1: files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
-with col_in2: 
-    manual_input_val = st.text_area("Manuelle Eingabe", 
-                                    value=st.session_state.manual_text,
-                                    placeholder="Straßen untereinander...", 
-                                    height=126)
 
-strassen_liste = []
-if files:
-    for f in files: strassen_liste.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
-if manual_input_val: 
-    strassen_liste.extend([s.strip() for s in manual_input_val.splitlines() if s.strip()])
-strassen_liste = list(dict.fromkeys(strassen_liste))
+# --- EINGABE-LOGIK ---
+col_in1, col_in2 = st.columns(2)
+with col_in1: 
+    files = st.file_uploader("TXT Dateien", type=["txt"], accept_multiple_files=True)
+    
+    # Straßen aus Dateien auslesen
+    if files:
+        file_streets = []
+        for f in files: file_streets.extend([s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()])
+        st.session_state.uploaded_streets = list(set(file_streets))
+    else:
+        st.session_state.uploaded_streets = []
+    
+    st.subheader("🔍 Straßensuche (Online-Prüfung)")
+    
+    # Formular zur Stabilisierung
+    with st.form("manual_add_form"):
+        query_input = st.text_input("Name der Straße:", placeholder="Straße eingeben (z.B. 'Am Markt')...")
+        
+        # ONLINE-VALIDIERUNG
+        if query_input and len(query_input) > 2:
+            with st.spinner("Prüfe Schreibweise..."):
+                try:
+                    # Suche nach ähnlichen Namen im Landkreis
+                    results = geolocator.geocode(f"{query_input}, Marburg-Biedenkopf", exactly_one=False, limit=5, timeout=5)
+                    if results:
+                        # Extrahiere nur den Straßennamen
+                        st.session_state.online_suggestions = [r.address.split(',')[0] for r in results]
+                        selected_suggestion = st.selectbox("Ähnliche Straßen gefunden:", st.session_state.online_suggestions)
+                    else:
+                        selected_suggestion = None
+                        st.write("Keine Übereinstimmung im Internet gefunden.")
+                except:
+                    selected_suggestion = None
+                    st.write("Fehler bei der Online-Prüfung.")
+        else:
+            selected_suggestion = None
+        
+        submit_btn = st.form_submit_button("➕ Korrekte Straße hinzufügen")
+        
+        if submit_btn and selected_suggestion:
+            if selected_suggestion not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(selected_suggestion)
+                save_streets(st.session_state.saved_manual_streets)
+                st.success(f"Hinzugefügt (validiert): {selected_suggestion}")
+                st.rerun()
+
+with col_in2: 
+    st.subheader("📝 Eingabeliste (Gespeichert)")
+    # Zeige die gespeicherten Straßen an
+    display_text = "\n".join(st.session_state.saved_manual_streets)
+    st.text_area("Straßenliste", 
+                 value=display_text,
+                 height=200,
+                 disabled=True,
+                 key="display_text_area")
+
+# Finale Liste für die Analyse
+strassen_liste = list(set(st.session_state.uploaded_streets + st.session_state.saved_manual_streets))
+strassen_liste = [s for s in strassen_liste if s]
 
 col_btn1, col_btn2, _ = st.columns([1, 1, 3])
 
 if col_btn1.button("🚀 Analyse starten", type="primary"):
-    st.session_state.manual_text = manual_input_val 
     st.session_state.run_processing, st.session_state.stop_requested = True, False
     st.session_state.ort_sammlung, st.session_state.fehler_liste = None, []
 
 if col_btn2.button("🛑 Abbruch", type="secondary"):
-    st.session_state.stop_requested, st.session_state.run_processing = True, False
-    st.session_state.manual_text = "" 
+    st.session_state.stop_requested, st.session_state.run_processing = False, False
     st.rerun()
 
 # --- 4. VERARBEITUNG ---
@@ -130,7 +221,6 @@ if st.session_state.run_processing and strassen_liste:
     st_text = st.empty()
     total = len(strassen_liste)
     
-    # max_workers höher, da wir weniger API-Limitierungen durch Reverse Geocoding haben
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(verarbeite_strasse, s): s for s in strassen_liste}
         for i, future in enumerate(futures):
@@ -158,6 +248,9 @@ if st.session_state.ort_sammlung:
 
     m = folium.Map(location=[50.8, 8.8], zoom_start=11)
     all_geoms = []
+    
+    marker_fg = folium.FeatureGroup(name="📍 Hausnummern-Marker")
+
     for ort, items in st.session_state.ort_sammlung.items():
         color = selected_colors.get(ort, "#FF0000")
         fg = folium.FeatureGroup(name=f"📍 {ort} ({len(items)} Str.)")
@@ -166,9 +259,19 @@ if st.session_state.ort_sammlung:
             folium.GeoJson(item["gdf"].__geo_interface__,
                            style_function=lambda x, c=color: {'color': c, 'weight': 6, 'opacity': 0.8},
                            tooltip=f"Gefunden: {item['name']}").add_to(fg)
+            
+            if item.get("marker"):
+                folium.Marker(
+                    location=item["marker"],
+                    popup=f"Hausnummer: {item['original']}",
+                    icon=folium.Icon(color="blue", icon="info-sign")
+                ).add_to(marker_fg)
+                
         fg.add_to(m)
     
+    marker_fg.add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
+    
     if all_geoms:
         combined = gpd.GeoDataFrame(pd.concat(all_geoms))
         b = combined.total_bounds
