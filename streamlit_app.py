@@ -3,80 +3,106 @@ import pandas as pd
 import os
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-072" 
+SERIAL_NUMBER = "SN-074" 
 
-# --- 1. SETUP & DATEI-CHECK ---
-st.set_page_config(page_title=f"INTEGRAL {SERIAL_NUMBER}", layout="wide")
+# --- 1. SETUP ---
+st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-def load_from_file():
+# Initialisierung aller State-Variablen
+if 'main_list' not in st.session_state:
     if os.path.exists(STREETS_FILE):
         with open(STREETS_FILE, "r", encoding="utf-8") as f:
-            return sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
-    return []
+            st.session_state.main_list = sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
+    else:
+        st.session_state.main_list = []
 
-def save_to_file(data_list):
-    cleaned = sorted(list(set([str(s).strip() for s in data_list if str(s).strip()])))
+if 'version_counter' not in st.session_state: st.session_state.version_counter = 0
+if 'analysis_active' not in st.session_state: st.session_state.analysis_active = False
+
+# --- 2. HILFSFUNKTIONEN ---
+def sync_to_disk():
+    # Bereinigen und Sortieren (A-Z)
+    st.session_state.main_list = sorted(list(set([str(s).strip() for s in st.session_state.main_list if str(s).strip()])))
     with open(STREETS_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(cleaned))
-    return cleaned
+        f.write("\n".join(st.session_state.main_list))
 
-# --- 2. SESSION STATE INITIALISIERUNG ---
-# Wir laden die Daten EINMALIG in den State beim Start
-if 'main_list' not in st.session_state:
-    st.session_state.main_list = load_from_file()
+# --- 3. UI LAYOUT ---
+st.title(f"🌐 Integral Dashboard {SERIAL_NUMBER}")
 
-# --- 3. UI HEADER ---
-st.title(f"📍 Integral Dashboard {SERIAL_NUMBER}")
-
-# Import & Einzel-Eingabe in einem kompakten Block
+# Kontroll-Zentrum
 with st.container():
-    c1, c2 = st.columns([2, 1])
+    c1, c2, c3 = st.columns([2, 1, 1])
+    
     with c1:
-        up = st.file_uploader("Datei laden (Drag & Drop)", type=["txt"], key="uploader")
+        # Drag & Drop Bereich
+        up = st.file_uploader("📂 Liste importieren (*.txt)", type=["txt"], key="uploader")
         if up:
             new_lines = [s.strip() for s in up.getvalue().decode("utf-8").splitlines() if s.strip()]
-            # Update State & Datei
-            st.session_state.main_list = save_to_file(st.session_state.main_list + new_lines)
+            st.session_state.main_list = list(set(st.session_state.main_list + new_lines))
+            st.session_state.version_counter += 1
+            sync_to_disk()
             st.rerun()
+
     with c2:
-        new_val = st.text_input("Manuelle Eingabe", placeholder="Straße 123", key="manual_add")
-        if st.button("➕ Hinzufügen") and new_val:
-            st.session_state.main_list = save_to_file(st.session_state.main_list + [new_val])
+        st.write("##") # Abstand
+        if st.button("🚀 ANALYSE STARTEN", type="primary", use_container_width=True):
+            st.session_state.analysis_active = True
+        
+        if st.button("🛑 ANALYSE STOPPEN", use_container_width=True):
+            st.session_state.analysis_active = False
+            st.rerun()
+
+    with c3:
+        st.write("##")
+        if st.button("🚨 LISTE LEEREN", use_container_width=True):
+            if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+            st.session_state.main_list = []
+            st.session_state.version_counter += 1
+            st.session_state.analysis_active = False
             st.rerun()
 
 st.markdown("---")
 
-# --- 4. DER TABELLEN-EDITOR (DER KRITISCHE TEIL) ---
-st.subheader(f"📝 Aktuelle Liste ({len(st.session_state.main_list)})")
+# Bereich für die manuelle Schnell-Eingabe
+with st.expander("➕ Einzeleingabe (Hausnummern korrigieren / hinzufügen)", expanded=False):
+    col_in, col_btn = st.columns([3, 1])
+    new_val = col_in.text_input("Straße & Hausnummer eingeben", key="manual_add_field")
+    if col_btn.button("Hinzufügen", use_container_width=True):
+        if new_val:
+            st.session_state.main_list.append(new_val)
+            st.session_state.version_counter += 1
+            sync_to_disk()
+            st.rerun()
 
-# Wir bauen das DataFrame direkt aus dem State
-df = pd.DataFrame(st.session_state.main_list, columns=["Adresse (Strasse | Nr)"])
+# --- 4. DIE TABELLE ---
+st.subheader(f"📝 Aktuelle Straßenliste ({len(st.session_state.main_list)})")
 
-# Wir nutzen KEINEN festen Key für den Editor, damit er bei jedem rerun() 
-# mit den Daten aus 'df' neu initialisiert wird.
+df_display = pd.DataFrame(st.session_state.main_list, columns=["Adresse (Strasse | Nr)"])
+
+# Der Editor nutzt den Versions-Key für den Force-Refresh
 edited_df = st.data_editor(
-    df, 
-    num_rows="dynamic", 
+    df_display,
+    num_rows="dynamic",
     use_container_width=True,
-    key=f"editor_v72_{len(st.session_state.main_list)}" # Trick: Key ändert sich bei Längenänderung
+    key=f"editor_v{st.session_state.version_counter}"
 )
 
-# Prüfen auf manuelle Änderungen in der Tabelle
-if not edited_df.equals(df):
-    st.session_state.main_list = save_to_file(edited_df["Adresse (Strasse | Nr)"].tolist())
-    st.rerun()
+# Echtzeit-Speicherung bei Tabellen-Edits
+if not edited_df.equals(df_display):
+    st.session_state.main_list = edited_df["Adresse (Strasse | Nr)"].tolist()
+    sync_to_disk()
 
-# --- 5. AKTIONEN ---
-st.write("##")
-col_a, col_b = st.columns(2)
-with col_a:
-    if st.button("🚀 ANALYSE STARTEN", type="primary", use_container_width=True):
-        st.success("Analyse bereit. (Geodaten-Modul folgt im nächsten Schritt)")
-with col_b:
-    if st.button("🚨 LISTE LEEREN", use_container_width=True):
-        if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
-        st.session_state.main_list = []
-        st.rerun()
+# --- 5. ANALYSE-ANZEIGE ---
+if st.session_state.analysis_active:
+    st.markdown("---")
+    st.subheader("📊 Analyse-Ergebnisse")
+    if not st.session_state.main_list:
+        st.warning("Keine Daten für die Analyse vorhanden.")
+    else:
+        st.info("Berechnung der optimalen Route und Kilometer läuft... (Hier binden wir im nächsten Schritt wieder OSMnx ein)")
+        # Platzhalter für die Ergebnisse (KM, Zeit, Karte)
+        st.metric("Gesamtstrecke", "0.00 km")
+        st.metric("Geschätzte Zeit", "0.0 Std.")
