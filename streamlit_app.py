@@ -12,7 +12,7 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-049" 
+SERIAL_NUMBER = "SN-051" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
@@ -32,7 +32,7 @@ STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 # --- OPTIMIERUNG: Timeout für geolocator ---
 geolocator = Nominatim(user_agent=f"integral_pro_{SERIAL_NUMBER}", timeout=5)
 
-# --- FESTER FARB-POOL FÜR ORTSTEILE ---
+# --- FESTER FARB-POOL FÜR ORTSTEILE (NEU: Fixiert) ---
 COLORS = ['#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080']
 
 # --- HILFSFUNKTIONEN FÜR DATEI-ZUGRIFF ---
@@ -214,21 +214,21 @@ with st.container():
                 st.rerun()
 
     with c_col2:
-        st.write("**📥 2. TXT-Import**")
-        # --- HIER WIRD DER IMPORT DIREKT VERARBEITET ---
+        st.write("**📥 2. TXT-Import (Auto-Clean)**")
         uploaded_file = st.file_uploader("Datei hochladen", type=["txt"], label_visibility="collapsed")
         if uploaded_file:
             file_streets = [s.strip() for s in uploaded_file.getvalue().decode("utf-8").splitlines() if s.strip()]
             new_list = st.session_state.saved_manual_streets + file_streets
+            # AUTO-BEREINIGUNG HIER
             st.session_state.saved_manual_streets = save_streets(new_list)
-            st.rerun() # Neuladen, damit die Liste sofort angezeigt wird
+            st.rerun()
 
     with c_col3:
         st.write("**🗑️ Cache**")
         if st.button("🗑️ Cache leeren", use_container_width=True):
             clear_all_caches()
             st.rerun()
-        if st.button("📋 Leeren", use_container_width=True):
+        if st.button("📋 Alles Löschen", use_container_width=True):
             if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
             st.session_state.saved_manual_streets = []
             st.rerun()
@@ -264,7 +264,7 @@ if st.session_state.run_processing:
         if not st.session_state.stop_requested:
             st.session_state.ort_sammlung, st.session_state.fehler_liste = dict(temp_ort), temp_err
             
-            # Farbzuordnung nach der Verarbeitung (sortiert nach Name für Konsistenz)
+            # --- FIXIERTE FARB-ZUORDNUNG ---
             sorted_orts = sorted(st.session_state.ort_sammlung.keys())
             st.session_state.ort_colors = {ort: COLORS[i % len(COLORS)] for i, ort in enumerate(sorted_orts)}
             
@@ -285,8 +285,9 @@ if st.session_state.ort_sammlung:
         for ort, items in st.session_state.ort_sammlung.items():
             res_data.append({"Ortsteil": ort, "Anzahl": len(items), "Farbe": st.session_state.ort_colors.get(ort, "#FFFFFF")})
         
-        # Einfache Anzeige der Farbe
-        st.dataframe(pd.DataFrame(res_data), use_container_width=True, hide_index=True)
+        # Anzeige der Farbe und Ortsteil
+        df_res = pd.DataFrame(res_data)
+        st.dataframe(df_res, use_container_width=True, hide_index=True)
 
         # Downloads
         st.markdown("---")
@@ -325,7 +326,7 @@ if st.session_state.ort_sammlung:
         
         components.html(m._repr_html_(), height=600)
         
-        # Download-Button für HTML Karte hier platziert
+        # Download-Button für HTML Karte
         col_d2.download_button("📥 Map HTML", m._repr_html_(), file_name="Ergebnis.html", mime="text/html", use_container_width=True)
 
 else:
@@ -333,7 +334,9 @@ else:
     st.write(f"📝 **3. Liste ({len(st.session_state.saved_manual_streets)})**")
     
     df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
-    edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True)
+    
+    # Nutzung von data_editor mit der Möglichkeit Zeilen zu löschen
+    edited_df = st.data_editor(df_streets, num_rows="dynamic", use_container_width=True, key="streets_editor")
     
     col_l1, col_l2, col_l3 = st.columns(3)
     if col_l1.button("💾 Speichern & Bereinigen", use_container_width=True):
