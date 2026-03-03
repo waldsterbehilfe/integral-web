@@ -179,7 +179,7 @@ if not st.session_state.ort_sammlung:
     with st.container():
         st.markdown("<div class='step-box'>", unsafe_allow_html=True)
         st.subheader("💡 Anleitung")
-        st.markdown("1. Fülle die Liste mit Straßen (Suchen oder TXT-Import).<br>2. Klicke auf '💾 Speichern & Bereinigen'.<br>3. Starte die Analyse.", unsafe_allow_html=True)
+        st.markdown("1. Lade eine Straßenliste hoch oder suche einzeln.<br>2. Klicke auf '💾 Speichern & Bereinigen'.<br>3. Starte die Analyse.", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
 # --- TOP CONTROL PANEL ---
@@ -215,16 +215,13 @@ with st.container():
 
     with c_col2:
         st.write("**📥 2. TXT-Import**")
-        files = st.file_uploader("Datei hochladen", type=["txt"], accept_multiple_files=True, label_visibility="collapsed")
-        if files:
-            new_streets = []
-            for f in files: 
-                file_streets = [s.strip() for s in f.getvalue().decode("utf-8").splitlines() if s.strip()]
-                new_streets.extend(file_streets)
-            
-            new_list = st.session_state.saved_manual_streets + new_streets
+        # --- HIER WIRD DER IMPORT DIREKT VERARBEITET ---
+        uploaded_file = st.file_uploader("Datei hochladen", type=["txt"], label_visibility="collapsed")
+        if uploaded_file:
+            file_streets = [s.strip() for s in uploaded_file.getvalue().decode("utf-8").splitlines() if s.strip()]
+            new_list = st.session_state.saved_manual_streets + file_streets
             st.session_state.saved_manual_streets = save_streets(new_list)
-            st.rerun()
+            st.rerun() # Neuladen, damit die Liste sofort angezeigt wird
 
     with c_col3:
         st.write("**🗑️ Cache**")
@@ -299,9 +296,6 @@ if st.session_state.ort_sammlung:
             col_d1.download_button("📥 Excel", excel_data, file_name=f"Analyse.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         except: pass
         
-        # HIER IST DER DOWNLOAD-BUTTON JETZT KORREKT PLATZIERT
-        # m = folium.Map(...)  # <--- Das war der Fehler, 'm' existierte hier noch nicht
-
     with col_res2:
         # Karte
         m = folium.Map(location=[50.8, 8.8], zoom_start=11)
