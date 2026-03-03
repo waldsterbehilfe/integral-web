@@ -1,87 +1,81 @@
 import streamlit as st
-import osmnx as ox
-import folium
-import io, re, os, random, shutil
 import pandas as pd
-import geopandas as gpd
-import networkx as nx
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from geopy.geocoders import Nominatim
-import streamlit.components.v1 as components
-import time
+import os
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-066" 
+SERIAL_NUMBER = "SN-067" 
 
-# --- 1. INITIALISIERUNG ---
-st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
+# --- 1. SETUP ---
+st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide")
 
-if 'saved_manual_streets' not in st.session_state: st.session_state.saved_manual_streets = []
-if 'ort_sammlung' not in st.session_state: st.session_state.ort_sammlung = None
-if 'run_processing' not in st.session_state: st.session_state.run_processing = False
-
+# Pfad zur Datei
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 
-# --- 2. SPEICHER-LOGIK (REPARIERT) ---
+# --- 2. FUNKTIONEN (SORTIERUNG & SPEICHERN) ---
+def load_streets():
+    if os.path.exists(STREETS_FILE):
+        with open(STREETS_FILE, "r", encoding="utf-8") as f:
+            # Direkt beim Laden sortieren (A-Z)
+            lines = [l.strip() for l in f.readlines() if l.strip()]
+            return sorted(list(set(lines)))
+    return []
+
 def save_streets(streets_list):
-    # Filtern von leeren Einträgen und Duplikaten
+    # Bereinigen und Sortieren vor dem Speichern
     cleaned = sorted(list(set([str(s).strip() for s in streets_list if str(s).strip()])))
     with open(STREETS_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(cleaned))
     st.session_state.saved_manual_streets = cleaned
 
-def load_streets():
-    if os.path.exists(STREETS_FILE):
-        with open(STREETS_FILE, "r", encoding="utf-8") as f:
-            return sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
-    return []
-
-# Einmaliges Laden beim Start
-if not st.session_state.saved_manual_streets:
+# Initialisierung
+if 'saved_manual_streets' not in st.session_state:
     st.session_state.saved_manual_streets = load_streets()
 
 # --- 3. UI ---
-st.title(f"Integral Dashboard {SERIAL_NUMBER}")
+st.title(f"📍 Straßenverwaltung {SERIAL_NUMBER}")
 
-# Import & Reset
-with st.expander("📂 Datei-Import & Reset"):
-    up = st.file_uploader("*.txt hochladen", type=["txt"])
+# Import Bereich (Drag & Drop + Datei)
+with st.expander("📥 Neue Liste laden (TXT)", expanded=len(st.session_state.saved_manual_streets) == 0):
+    up = st.file_uploader("Zieh deine *.txt Datei hierher oder klicke zum Auswählen", type=["txt"])
     if up:
-        imported = [s.strip() for s in up.getvalue().decode("utf-8").splitlines() if s.strip()]
-        new_list = st.session_state.saved_manual_streets + imported
-        save_streets(new_list)
-        st.rerun()
-    
-    if st.button("🚨 KOMPLETT-RESET"):
-        if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
-        st.session_state.saved_manual_streets = []
-        st.session_state.ort_sammlung = None
+        new_content = [s.strip() for s in up.getvalue().decode("utf-8").splitlines() if s.strip()]
+        # Kombiniere alte und neue Daten, sortiere sie
+        combined = st.session_state.saved_manual_streets + new_content
+        save_streets(combined)
+        st.success(f"{len(new_content)} Einträge geladen und alphabetisch einsortiert!")
         st.rerun()
 
 st.markdown("---")
 
-# Editor Bereich (Der Fix)
-if not st.session_state.ort_sammlung:
-    st.subheader(f"📝 Aktuelle Straßenliste ({len(st.session_state.saved_manual_streets)})")
-    
-    # Wir erstellen ein DataFrame für den Editor
-    df_editor = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
-    
-    # WICHTIG: Der Key 'streets_editor' sorgt dafür, dass Streamlit den State hält
-    edited_df = st.data_editor(
-        df_editor, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        key="streets_editor"
-    )
+# Editor Bereich
+st.subheader(f"📝 Aktuelle Straßenliste ({len(st.session_state.saved_manual_streets)} Einträge)")
+st.info("Du kannst direkt in die Zellen klicken, um Hausnummern zu ergänzen oder Fehler zu korrigieren. Neue Zeilen am Ende hinzufügen ist ebenfalls möglich.")
 
-    # Prüfen ob sich was geändert hat (Hinzugefügt, Gelöscht, Bearbeitet)
-    if not edited_df.equals(df_editor):
-        save_streets(edited_df["Adresse (Strasse | Nr)"].tolist())
-        st.rerun()
+# Wir nutzen ein DataFrame für die komfortable Bearbeitung
+df_display = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
 
+# Der Editor mit dynamischen Zeilen
+edited_df = st.data_editor(
+    df_display, 
+    num_rows="dynamic", 
+    use_container_width=True, 
+    key="streets_editor_v67"
+)
+
+# Überprüfung auf Änderungen & Automatisches Sortieren nach Korrektur
+if not edited_df.equals(df_display):
+    # Wenn der Nutzer fertig ist mit Tippen, sortieren wir neu und speichern
+    save_streets(edited_df["Adresse (Strasse | Nr)"].tolist())
+    st.rerun()
+
+# Steuerung
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
     if st.button("🚀 ANALYSE STARTEN", type="primary"):
-        st.session_state.run_processing = True
+        st.write("Analyse wird vorbereitet...")
+with col_btn2:
+    if st.button("🚨 LISTE LEEREN"):
+        if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+        st.session_state.saved_manual_streets = []
         st.rerun()
