@@ -12,30 +12,19 @@ import streamlit.components.v1 as components
 import time
 
 # --- 0. SERIENNUMMER ---
-SERIAL_NUMBER = "SN-053" 
+SERIAL_NUMBER = "SN-055" 
 
 # --- 1. SETUP & THEME ---
 st.set_page_config(page_title=f"INTEGRAL DASHBOARD {SERIAL_NUMBER}", layout="wide", page_icon="🌐")
 
 LOGO_URL = "https://integral-online.de/images/integral-gmbh-logo.png"
 
-# --- THEME SWITCHER (INTEGRAL DESIGN) ---
-st.sidebar.title("Einstellungen")
-theme = st.sidebar.toggle("Dark Mode", value=False)
-
-# Farben Integral Design
-if theme:
-    bg_color = "#0E1117"
-    text_color = "#FAFAFA"
-    box_bg = "#1E232B"
-    border_color = "#31333F"
-    accent_color = "#1E88E5" 
-else:
-    bg_color = "#FFFFFF"
-    text_color = "#333333"
-    box_bg = "#F0F2F6"
-    border_color = "#CCCCCC"
-    accent_color = "#004A99" 
+# --- FIXES DUNKEL DESIGN ---
+bg_color = "#0E1117"
+text_color = "#FAFAFA"
+box_bg = "#1E232B"
+border_color = "#31333F"
+accent_color = "#1E88E5" # Integral Blau für Dark
 
 st.markdown(f"""
 <style>
@@ -44,6 +33,8 @@ st.markdown(f"""
     h1, h2, h3 {{color: {accent_color} !important;}}
     .step-box {{background-color: {box_bg}; padding: 15px; border-radius: 5px; border: 1px solid {border_color}; margin-bottom: 15px;}}
     .stButton>button {{background-color: {accent_color}; color: white; border-radius: 5px;}}
+    /* Spinner Farbe */
+    .stSpinner > div > div {{border-top-color: {accent_color} !important;}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -76,9 +67,8 @@ def load_streets():
 def sync_editor():
     """Wird aufgerufen, wenn der Editor geändert wird"""
     if "streets_editor" in st.session_state:
-        # Extrahiere die aktuelle Liste aus dem Editor-State
-        current_data = st.session_state["streets_editor"]["to_dict"]()["Adresse (Strasse | Nr)"].values()
-        save_streets(list(current_data))
+        current_data = st.session_state["streets_editor"]["data"]["Adresse (Strasse | Nr)"].tolist()
+        save_streets(current_data)
 
 def clear_all_caches():
     if os.path.exists(CACHE_DIR):
@@ -215,6 +205,12 @@ with st.container():
             if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
             st.session_state.saved_manual_streets = []
             st.rerun()
+        # --- NEU: ZURÜCKSETZEN ---
+        if st.button("🔄 Zurücksetzen", use_container_width=True):
+            if os.path.exists(STREETS_FILE): os.remove(STREETS_FILE)
+            st.session_state.saved_manual_streets = []
+            st.session_state.ort_sammlung = None
+            st.rerun()
 
     with c_col4:
         st.write("**🚀 Analyse**")
@@ -226,12 +222,15 @@ with st.container():
 
 st.markdown("---")
 
-# Verarbeitung
+# Verarbeitung mit Spinner
 if st.session_state.run_processing:
     temp_ort, temp_err = defaultdict(list), []
-    with st.spinner("Analysiere Daten..."):
+    
+    # --- SPINNER UND FORTSCHRITT ---
+    with st.spinner("🔍 Analysiere Daten... Bitte warten..."):
         pb = st.progress(0)
         total = len(st.session_state.saved_manual_streets)
+        
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {executor.submit(verarbeite_strasse, s): s for s in st.session_state.saved_manual_streets}
             for i, future in enumerate(futures):
@@ -240,10 +239,15 @@ if st.session_state.run_processing:
                 if res.get("success"): temp_ort[res["ort"]].append(res)
                 else: temp_err.append(res.get("original"))
                 pb.progress((i + 1) / total)
+        
         st.session_state.ort_sammlung = dict(temp_ort)
         sorted_orts = sorted(st.session_state.ort_sammlung.keys())
         st.session_state.ort_colors = {ort: COLORS[i % len(COLORS)] for i, ort in enumerate(sorted_orts)}
+    
     st.session_state.run_processing = False
+    
+    # --- LUFTBALLONS ---
+    st.balloons()
     st.rerun()
 
 # Anzeige
@@ -275,4 +279,5 @@ if st.session_state.ort_sammlung:
 else:
     st.write(f"📝 **3. Straßenliste ({len(st.session_state.saved_manual_streets)})**")
     df_streets = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Adresse (Strasse | Nr)"])
+    # Dateneditor mit korrekter Sync-Funktion
     st.data_editor(df_streets, num_rows="dynamic", use_container_width=True, key="streets_editor", on_change=sync_editor)
