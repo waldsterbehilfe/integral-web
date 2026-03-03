@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 from difflib import get_close_matches
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-ULTIMATE"
+SERIAL_NUMBER = "SN-029-GOLD3002-ULTIMATE-FIX"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,21 +28,25 @@ def load_streets():
     if not os.path.exists(STREETS_FILE): return []
     try:
         with open(STREETS_FILE, "r", encoding="utf-8-sig") as f:
-            return sorted(list(set([l.strip() for l in f.readlines() if l.strip()])))
+            lines = [l.strip() for l in f.readlines() if l.strip()]
+            return sorted(list(set(lines)))
     except: return []
 
 def save_streets_safely(streets_list):
     try:
+        unique_list = sorted(list(set([s.strip() for s in streets_list if s.strip()])))
         with tempfile.NamedTemporaryFile('w', delete=False, encoding='utf-8-sig', dir=BASE_DIR) as tf:
-            tf.write("\n".join(sorted(list(set(streets_list)))))
+            tf.write("\n".join(unique_list))
             temp_name = tf.name
         os.replace(temp_name, STREETS_FILE)
-    except Exception as e: st.error(f"Fehler: {e}")
+    except Exception as e: st.error(f"Speicherfehler: {e}")
 
 def load_verified_cache():
     if os.path.exists(VERIFIED_CACHE_FILE):
-        with open(VERIFIED_CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(VERIFIED_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except: return {}
     return {}
 
 def save_to_verified_cache(raw_name, verified_name):
@@ -62,19 +66,10 @@ def intelligent_parse(line):
     return line, ""
 
 def validate_at_start(input_street, street_cache):
-    """Prüft beim Start erst im Cache, dann im Netz."""
     low_name = input_street.lower().strip()
-    
-    # 1. Direkter Cache Match
-    if low_name in street_cache:
-        return street_cache[low_name]
-    
-    # 2. Fuzzy Match (Ähnlichkeit im Cache suchen)
+    if low_name in street_cache: return street_cache[low_name]
     matches = get_close_matches(low_name, street_cache.keys(), n=1, cutoff=0.85)
-    if matches:
-        return street_cache[matches[0]]
-    
-    # 3. Internet Validierung
+    if matches: return street_cache[matches[0]]
     try:
         query = f"{input_street}, Marburg-Biedenkopf"
         loc = geolocator.geocode(query, addressdetails=True)
@@ -95,35 +90,48 @@ if 'stop_requested' not in st.session_state:
 if 'ort_sammlung' not in st.session_state:
     st.session_state.ort_sammlung = None
 
-# --- 5. UI: IMPORT & INPUT (WIE GEWÜNSCHT) ---
+# --- 5. UI: IMPORT & INPUT ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Status: {SERIAL_NUMBER} | Lokaler Datenstamm: {len(st.session_state.saved_manual_streets)}")
+st.caption(f"Status: {SERIAL_NUMBER} | Einträge: {len(st.session_state.saved_manual_streets)}")
 
 with st.expander("📥 Daten importieren / hinzufügen", expanded=True):
-    up = st.file_uploader("*.txt Dateien", type=["txt"], accept_multiple_files=True)
+    # Eindeutiger Key für den Uploader
+    up = st.file_uploader("*.txt Dateien auswählen", type=["txt"], accept_multiple_files=True, key="file_uploader_main")
+    
     if up:
         new_raw = []
         for f in up:
-            lines = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
-            new_raw.extend([l.strip() for l in lines if l.strip()])
+            content = f.getvalue().decode("utf-8-sig", errors="ignore").splitlines()
+            new_raw.extend([l.strip() for l in content if l.strip()])
+        
         if new_raw:
-            st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_raw)))
-            save_streets_safely(st.session_state.saved_manual_streets)
+            # WICHTIG: Sofortige Verschmelzung mit dem State
+            current_list = st.session_state.saved_manual_streets
+            combined = sorted(list(set(current_list + new_raw)))
+            st.session_state.saved_manual_streets = combined
+            save_streets_safely(combined)
+            st.success(f"{len(new_raw)} Zeilen verarbeitet.")
+            # Hartes Rerendering erzwingen
             st.rerun()
 
     c1, c2, c3 = st.columns([3, 1, 1])
-    m_s = c1.text_input("Straße")
-    m_h = c2.text_input("Hnr")
+    m_s = c1.text_input("Straße", key="manual_s_in")
+    m_h = c2.text_input("Hnr", key="manual_h_in")
     if c3.button("Hinzufügen", use_container_width=True):
         if m_s:
-            st.session_state.saved_manual_streets.append(f"{m_s} | {m_h}".strip(" |"))
-            save_streets_safely(st.session_state.saved_manual_streets)
-            st.rerun()
+            entry = f"{m_s} | {m_h}".strip(" |")
+            if entry not in st.session_state.saved_manual_streets:
+                st.session_state.saved_manual_streets.append(entry)
+                st.session_state.saved_manual_streets.sort()
+                save_streets_safely(st.session_state.saved_manual_streets)
+                st.rerun()
 
 # --- 6. LISTE & STEUERUNG ---
 with st.container(border=True):
+    # DataFrame wird bei jedem Lauf aus dem State neu erzeugt
     df_disp = pd.DataFrame(st.session_state.saved_manual_streets, columns=["Eintrag"])
-    ed_key = f"ed_{len(st.session_state.saved_manual_streets)}"
+    # Der Key ändert sich bei jeder Änderung der Anzahl -> Refresh-Trigger
+    ed_key = f"editor_v1_{len(st.session_state.saved_manual_streets)}"
     ed_df = st.data_editor(df_disp, use_container_width=True, num_rows="dynamic", height=250, key=ed_key)
     
     col_b1, col_b2, col_b3 = st.columns(3)
@@ -135,12 +143,12 @@ with st.container(border=True):
         st.session_state.saved_manual_streets = []
         save_streets_safely([])
         st.rerun()
-    if col_b3.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
+    if col_btn_start := col_b3.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
         st.session_state.run_processing = True
         st.session_state.stop_requested = False
         st.rerun()
 
-# --- 7. ANALYSE-ENGINE (MIT OPTION 1) ---
+# --- 7. ANALYSE-ENGINE ---
 if st.session_state.run_processing:
     results = defaultdict(list)
     v_cache = load_verified_cache()
@@ -149,13 +157,13 @@ if st.session_state.run_processing:
     
     if st.button("🛑 STOP"): st.session_state.stop_requested = True
 
-    with st.status("Validierung & Analyse läuft...", expanded=True) as status:
+    with st.status("Verarbeitung läuft...", expanded=True) as status:
         p_bar = st.progress(0)
         for i, s in enumerate(s_list):
             if st.session_state.stop_requested: break
             
-            # --- OPTION 1: Validierung erst hier beim Start ---
             raw_s, hnr = intelligent_parse(s)
+            # Option 1: Validierung beim Start
             v_name = validate_at_start(raw_s, v_cache)
             s_cl = re.sub(r'(?i)\bstr\b\.?', 'Straße', v_name).strip()
             
@@ -166,18 +174,22 @@ if st.session_state.run_processing:
                     if not gdf.empty:
                         m_pos = None
                         if hnr:
-                            l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
-                            if l: m_pos = (l.latitude, l.longitude)
+                            try:
+                                l = geolocator.geocode(f"{s_cl} {hnr}, Marburg-Biedenkopf")
+                                if l: m_pos = (l.latitude, l.longitude)
+                            except: pass
                         
                         cent = gdf.geometry.unary_union.centroid
                         ckey = f"{round(cent.y, 3)},{round(cent.x, 3)}"
                         if ckey in ort_cache:
                             ort = ort_cache[ckey]
                         else:
-                            rv = geolocator.reverse((cent.y, cent.x), language='de')
-                            addr = rv.raw.get('address', {})
-                            ort = addr.get('village') or addr.get('suburb') or addr.get('town') or "Marburg"
-                            ort_cache[ckey] = ort
+                            try:
+                                rv = geolocator.reverse((cent.y, cent.x), language='de')
+                                addr = rv.raw.get('address', {})
+                                ort = addr.get('village') or addr.get('suburb') or addr.get('town') or "Marburg-Land"
+                                ort_cache[ckey] = ort
+                            except: ort = "Unbekannt"
                         
                         results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
             except: pass
@@ -186,23 +198,19 @@ if st.session_state.run_processing:
         
         st.session_state.ort_sammlung = dict(results)
         st.session_state.run_processing = False
-        status.update(label="Analyse beendet!", state="complete")
+        status.update(label="Fertig!", state="complete")
         st.rerun()
 
 # --- 8. AUSGABE & STATISTIK (OPTION 2) ---
 if st.session_state.ort_sammlung:
     st.divider()
-    
-    # Option 2: Statistik-Bereich
     st.subheader("📊 Ortsteil-Verteilung")
-    stat_data = []
-    for ort, items in st.session_state.ort_sammlung.items():
-        stat_data.append({"Ortsteil": ort, "Anzahl Straßen": len(items)})
+    stat_data = [{"Ortsteil": k, "Anzahl": len(v)} for k, v in st.session_state.ort_sammlung.items()]
     st.dataframe(pd.DataFrame(stat_data), use_container_width=True)
 
-    exp_df = pd.DataFrame([{"Ortsteil": k, "Straße": i["name"], "Marker": "Ja" if i["marker"] else "Nein"} 
+    exp_df = pd.DataFrame([{"Ortsteil": k, "Straße": i["name"], "Quelle": i["orig"]} 
                           for k, v in st.session_state.ort_sammlung.items() for i in v])
-    st.download_button("📥 CSV Export", exp_df.to_csv(index=False).encode('utf-8-sig'), "ergebnisse.csv", use_container_width=True)
+    st.download_button("📥 Ergebnisse (CSV)", exp_df.to_csv(index=False).encode('utf-8-sig'), "export.csv", use_container_width=True)
 
     m = folium.Map(location=[50.8, 8.8], zoom_start=11, tiles="cartodbpositron")
     all_pts = []
