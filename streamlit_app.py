@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 from difflib import get_close_matches
 
 # --- 1. SETUP & CONFIG ---
-SERIAL_NUMBER = "SN-029-GOLD3002-CELEBRATION"
+SERIAL_NUMBER = "SN-029-GOLD3002-SPINNER"
 st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +21,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = CACHE_DIR
-geolocator = Nominatim(user_agent=f"integral_celeb_{random.randint(1000,9999)}", timeout=12)
+geolocator = Nominatim(user_agent=f"integral_spinner_{random.randint(1000,9999)}", timeout=12)
 
 # --- 2. PERSISTENZ & CACHE LOGIK ---
 def load_streets():
@@ -91,10 +91,10 @@ if 'ort_sammlung' not in st.session_state:
 
 # --- 5. UI: IMPORT & STEUERUNG ---
 st.title("🚀 INTEGRAL PRO")
-st.caption(f"Status: {SERIAL_NUMBER} | Gesamtzahl geladen: {len(st.session_state.saved_manual_streets)}")
+st.caption(f"Version: {SERIAL_NUMBER} | Straßen geladen: {len(st.session_state.saved_manual_streets)}")
 
 with st.container(border=True):
-    up = st.file_uploader("*.txt Dateien hochladen", type=["txt"], accept_multiple_files=True, key="uploader_celeb")
+    up = st.file_uploader("*.txt Dateien hochladen", type=["txt"], accept_multiple_files=True, key="uploader_final")
     if up:
         new_raw = []
         for f in up:
@@ -103,7 +103,7 @@ with st.container(border=True):
         if new_raw:
             st.session_state.saved_manual_streets = sorted(list(set(st.session_state.saved_manual_streets + new_raw)))
             save_streets_safely(st.session_state.saved_manual_streets)
-            st.success(f"Erfolgreich geladen: {len(new_raw)} neue Zeilen.")
+            st.success(f"Daten erfolgreich importiert.")
             st.rerun()
 
     st.divider()
@@ -114,13 +114,13 @@ with st.container(border=True):
         st.rerun()
     if c_btn2.button("🔥 ANALYSE STARTEN", type="primary", use_container_width=True):
         if not st.session_state.saved_manual_streets:
-            st.warning("Keine Daten vorhanden!")
+            st.warning("Bitte laden Sie zuerst eine Datei hoch!")
         else:
             st.session_state.run_processing = True
             st.session_state.stop_requested = False
             st.rerun()
 
-# --- 6. ANALYSE-ENGINE (MIT KONFETTI-ABSCHLUSS) ---
+# --- 6. ANALYSE-ENGINE (MIT GROSSEM SPINNER) ---
 if st.session_state.run_processing:
     results = defaultdict(list)
     v_cache = load_verified_cache()
@@ -130,15 +130,17 @@ if st.session_state.run_processing:
     
     if st.button("🛑 STOP"): st.session_state.stop_requested = True
 
-    with st.status("Verarbeitung läuft...", expanded=True) as status:
-        p_bar = st.progress(0)
+    # Optik: Großer Spinner für die gesamte Laufzeit
+    with st.spinner("🚀 ANALYSE LÄUFT... BITTE WARTEN"):
         st_info = st.empty()
         
         for i, s in enumerate(s_list):
             if st.session_state.stop_requested: break
             
             display_index = i + 1
-            st_info.markdown(f"**Verarbeite:** `{s}`  \n(Eintrag **{display_index}** von **{total_count}**)")
+            # X von Y Anzeige unter dem Spinner
+            st_info.markdown(f"### 📍 Prüfe: `{s}`")
+            st_info.info(f"Eintrag **{display_index}** von **{total_count}**")
             
             raw_s, hnr = intelligent_parse(s)
             v_name = validate_at_start(raw_s, v_cache)
@@ -171,18 +173,16 @@ if st.session_state.run_processing:
                         results[ort].append({"gdf": gdf, "name": s_cl, "marker": m_pos, "orig": s})
             except: pass
             
-            p_bar.progress(display_index / total_count)
             time.sleep(1.05)
         
         st_info.empty()
         st.session_state.ort_sammlung = dict(results)
         st.session_state.run_processing = False
         
-        # --- KONFETTI & BALLONS BEIM ABSCHLUSS ---
         if not st.session_state.stop_requested:
-            st.balloons() # Löst die Animation aus
-            
-        status.update(label=f"Fertig! {total_count} von {total_count} Einträgen verarbeitet.", state="complete")
+            st.balloons()
+            st.success(f"Analyse abgeschlossen! {total_count} Einträge verarbeitet.")
+            time.sleep(2)
         st.rerun()
 
 # --- 7. AUSGABE & STATISTIK ---
