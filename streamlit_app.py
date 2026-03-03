@@ -18,7 +18,7 @@ st.set_page_config(page_title=f"INTEGRAL PRO {SERIAL_NUMBER}", layout="wide")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STREETS_FILE = os.path.join(BASE_DIR, ".manual_streets.txt")
 CACHE_DIR = os.path.join(BASE_DIR, "osmnx_cache")
-EGG_IMAGE_PATH = os.path.join(BASE_DIR, "eegg.jpg") # Pfad zum Easter Egg Bild
+EGG_IMAGE_PATH = os.path.join(BASE_DIR, "eegg.jpg")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 ox.settings.use_cache = True
@@ -49,25 +49,37 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# --- 3. HAUPTBEREICH & EASTER EGG ---
-c_title, c_egg_trigger = st.columns([12, 1])
-with c_title:
-    st.title("🚀 INTEGRAL PRO")
-with c_egg_trigger:
-    # Das "O" als unsichtbarer Button-Trigger
-    if st.button("O", key="egg_btn", help="Klick mich!"):
-        st.session_state.egg_counter += 1
+# --- 3. HAUPTBEREICH MIT VERSTECKTEM O ---
+c_title_main, c_title_o = st.columns([2.3, 10]) # Präzise Spalten für den "PRO" Look
 
-# Easter Egg Logik (10 Klicks)
+with c_title_main:
+    st.markdown("<h1 style='text-align: right; margin-bottom: 0;'>🚀 INTEGRAL PR</h1>", unsafe_allow_html=True)
+
+with c_title_o:
+    # Das O als funktionaler Trigger
+    if st.button("O", key="egg_trigger", help=None):
+        st.session_state.egg_counter += 1
+    # CSS, um den Button wie einen Buchstaben aussehen zu lassen
+    st.markdown("""
+        <style>
+            div[data-testid="stColumn"]:nth-child(2) button {
+                background: none; border: none; padding: 0;
+                font-size: 3rem; font-weight: 700; color: white;
+                margin-top: 0.45rem; line-height: 1;
+            }
+            div[data-testid="stColumn"]:nth-child(2) button:hover { color: #00ff00; }
+        </style>
+    """, unsafe_allow_html=True)
+
+# Easter Egg Anzeige
 if st.session_state.egg_counter >= 10:
     st.balloons()
     with st.container(border=True):
         st.success("🎉 Easter Egg aktiviert!")
         if os.path.exists(EGG_IMAGE_PATH):
-            st.image(EGG_IMAGE_PATH, caption="Überraschung!", use_container_width=True)
+            st.image(EGG_IMAGE_PATH, use_container_width=True)
         else:
-            st.error(f"Bild 'eegg.jpg' wurde im Ordner {BASE_DIR} nicht gefunden.")
-        
+            st.error("Bild 'eegg.jpg' nicht gefunden.")
         if st.button("Schließen"):
             st.session_state.egg_counter = 0
             st.rerun()
